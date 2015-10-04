@@ -1,0 +1,61 @@
+# -*- mode: Makefile -*-
+# Copyright (c) 2015, Grzegorz Junka
+# All rights reserved.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+#
+# * Redistributions of source code must retain the above copyright notice, this
+#   list of conditions and the following disclaimer.
+#
+# * Redistributions in binary form must reproduce the above copyright notice,
+#   this list of conditions and the following disclaimer in the documentation
+#   and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+# DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+# SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+# CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+# OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+# OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+#-------------------------------------------------------------------------------
+
+## Defaults, change if needed
+#-------------------------------------------------------------------------------
+# Details of the builderl repository
+BLDERLURL  ?= -b master git://github.com/yoonka/builderl.git $(BLDERLPATH)/
+# An optional custom makefile to include
+CUSTOMMK   ?= GNUmakefileCustom
+#-------------------------------------------------------------------------------
+
+# Pull builderl repository if needed
+ISBLDERL := $(shell git --git-dir=$(BLDERLPATH)/.git \
+  --work-tree=$(BLDERLPATH)/ status > /dev/null 2>&1; echo $$?)
+BLDISDIFF := $(shell git diff $(BLDERLPATH) 2>&1 | wc -l | tr -d '[[:space:]]')
+ifneq ($(ISBLDERL)-$(BLDISDIFF),0-0)
+$(info Repository $(BLDERLPATH)/ not up to date, will try to update)
+ISDIRTY := $(shell git diff $(BLDERLPATH) 2>/dev/null \
+  | grep "\-dirty" | wc -l | tr -d '[[:space:]]')
+ifeq ($(ISDIRTY),0)
+ISBLDERL := $(shell git submodule update --init $(BLDERLPATH) \
+  > /dev/null 2>&1; echo $$?)
+ifneq ($(ISBLDERL),0)
+$(error Can not update submodule $(BLDERLPATH))
+endif # ISBLDERL
+$(shell rm -f bin/builderl)
+$(shell ln -s ../$(BLDERLPATH) bin/builderl)
+else # ISDIRTY
+$(warning $(BLDERLPATH)/ contains local changes, not updating!)
+endif # ISDIRTY
+endif # ISBLDERL-BLDISDIFF
+
+incs := common rel_app_vars deps targets configs clean debug
+include $(foreach file,$(incs),$(BLDERLPATH)/makefiles/$(file))
+
+ifneq ($(wildcard $(CUSTOMMK)),)
+include $(CUSTOMMK)
+endif

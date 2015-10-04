@@ -1,0 +1,35 @@
+## This file is auto-generated from template: etc/vm_local.args.src
+
+## Enable kernel poll and a few async threads
++K true
++A 32
+
+## Treat error_logger warnings as warnings
++W w
+
+# Enable CTRL+D instead of CTRL+C
++Bi
+
+## Set the location of crash dumps
+-env ERL_CRASH_DUMP "tmp/"
+
+## Force the erlang VM to use SMP
+-smp enable
+
+## Paths to .beam files
+=PATHS=
+
+## Begin SSL distribution items, DO NOT DELETE OR EDIT THIS COMMENT
+
+## To enable SSL encryption of the Erlang intra-cluster communication,
+## un-comment the three lines below and make certain that the paths
+## point to correct PEM data files.  See docs TODO for details.
+
+## -proto_dist inet_ssl
+## -ssl_dist_opt client_certfile "{{platform_etc_dir}}/erlclient.pem"
+## -ssl_dist_opt server_certfile "{{platform_etc_dir}}/erlserver.pem"
+## Example:
+## -ssl_dist_opt client_certfile "/etc/core/erlclient.pem"
+## -ssl_dist_opt server_certfile "/etc/core/erlserver.pem"
+
+## End SSL distribution items, DO NOT DELETE OR EDIT THIS COMMENT

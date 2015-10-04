@@ -1,0 +1,9 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -smp enable -hidden
+
+-include("builderl/include/load_builderl.hrl").
+
+main([]) ->
+    load_builderl(),
+    bld_rel:mk_rel(?BUILDERLLINK).

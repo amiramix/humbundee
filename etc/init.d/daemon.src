@@ -1,0 +1,9 @@
+#!/bin/sh
+
+DESC="Node {{node}}"
+NAME={{node_cmd_name}}
+DAEMON=/usr/sbin/$NAME
+lockfile=/var/lock/subsys/$NAME
+pidfile=/var/run/$NAME/$NAME.pid
+
+# Here would be the service definition

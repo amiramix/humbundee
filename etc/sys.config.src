@@ -1,0 +1,28 @@
+%% -*- erlang -*-
+%% This file is auto-generated from template: sys.config.src
+
+[{kernel,
+  [{net_ticktime, 90},
+   {start_timer, true},
+   {inet_dist_listen_min, 22200},
+   {inet_dist_listen_max, 22210},
+   {sync_nodes_optional, []},
+   {sync_nodes_timeout, 3000}]},
+
+ {sasl,
+  [{error_logger_mf_dir, "../=NODE=/sasl_logfiles/"},
+   {error_logger_mf_maxbytes, 100000},
+   {error_logger_mf_maxfiles, 8}]},
+
+ {yolf,
+  [{log_file_name, "../=NODE=/log/yolf.log"}]},
+
+ {lager,
+  [{handlers,
+    [{lager_file_backend,
+      [{file, "../=NODE=/log/lager.log"},
+       {level, debug}, {size, 67108864}, {date, "$D0"}]}
+    ]},
+   {crash_log, "../=NODE=/log/lager_crash.log"}
+  ]}
+].
