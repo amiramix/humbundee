@@ -22,14 +22,14 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(hbd_sup).
+-module(hbd_one_sup).
 -behaviour(supervisor).
 
 %% API
 -export([start_link/0]).
 
 %% Supervisor callbacks
--export([init/1]).
+-export([init/1, add/2]).
 
 -include_lib("yolf/include/yolf.hrl").
 
@@ -41,11 +41,24 @@ start_link() ->
 
 init([]) ->
     ?LOG_SUPERVISOR_INIT(?SERVER),
+    Child = ?WORKER(hbd_one),
+    {ok, {{simple_one_for_one, 3, 30}, [Child]}}.
 
-    EventMngr = ?WORKER(hbd_event),
-    OneSup = ?SUPERVISOR(hbd_one_sup),
+add(Name, Cfg) ->
+    Server = hbd_one:server_name(Name),
+    State = Cfg#{name => Name},
+    case whereis(Server) of
+        undefined ->
+            add_child(Server, State);
+        Pid ->
+            delete_child(Server, Pid),
+            add_child(Server, State)
+    end.
 
-    Children = [EventMngr, OneSup],
+add_child(Server, State) ->
+    lager:info(<<" == hbd_one_sup: add child:~p">>, [Server]),
+    supervisor:start_child(?SERVER, [Server, State]).
 
-    lager:debug(<<"Creating supervisor tree:~p">>, [Children]),
-    {ok, {{one_for_one, 2, 10}, Children}}.
+delete_child(Server, Pid) ->
+    lager:info(<<" == hbd_one_sup: delete child:~p">>, [Server]),
+    ok = supervisor:terminate_child(?SERVER, Pid).

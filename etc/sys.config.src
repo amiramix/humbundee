@@ -24,5 +24,14 @@
        {level, debug}, {size, 67108864}, {date, "$D0"}]}
     ]},
    {crash_log, "../=NODE=/log/lager_crash.log"}
+  ]},
+
+ {humbundee,
+  [{order_url, <<"https://www.humblebundle.com/api/v1/order/">>},
+   {cookie, "../=NODE=/humblebundle.cookie"},
+   {order_ids_file, "../=NODE=/humblebundle.txt"},
+   {download_location, "../=NODE=/humblebundle"},
+   {exclude_regex_list, [<<".mobi">>]},
+   {workers, 20}
   ]}
 ].

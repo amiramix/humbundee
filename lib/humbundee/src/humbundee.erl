@@ -22,30 +22,50 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(hbd_sup).
--behaviour(supervisor).
+-module(humbundee).
 
-%% API
--export([start_link/0]).
+-export([download/0]).
 
-%% Supervisor callbacks
--export([init/1]).
+download() ->
+    try
+        check_wget() andalso do()
+    catch
+        throw:Term -> {error, Term}
+    end.
 
--include_lib("yolf/include/yolf.hrl").
+check_wget() ->
+    case os:cmd("which wget") of
+        [] -> no_wget();
+        _ -> true
+    end.
 
--define(SERVER, ?MODULE).
+no_wget() ->
+    yio:errorn(<<"Error: wget not installed.">>),
+    throw(no_wget).
 
-start_link() ->
-    ?LOG_SUPERVISOR(?SERVER),
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+do() ->
+    Cfg = read_config(),
+    _Ids = read_ids(Cfg).
 
-init([]) ->
-    ?LOG_SUPERVISOR_INIT(?SERVER),
+read_config() ->
+    {ok, Url} = application:get_env(humbundee, order_url),
+    {ok, Coo} = application:get_env(humbundee, cookie),
+    {ok, Ids} = application:get_env(humbundee, order_ids_file),
+    {ok, Dir} = application:get_env(humbundee, download_location),
+    Exc = application:get_env(humbundee, exclude_regex_list, []),
+    #{url => Url, cookie => Coo, ids => Ids, dir => Dir, regex => Exc}.
 
-    EventMngr = ?WORKER(hbd_event),
-    OneSup = ?SUPERVISOR(hbd_one_sup),
+read_ids(#{ids := Ids} = Cfg) ->
+    case file:read_file(Ids) of
+        {ok, Bin} -> process_ids(Cfg, Bin);
+        {error, Err} -> no_ids_file(Ids, Err)
+    end.
 
-    Children = [EventMngr, OneSup],
+no_ids_file(Ids, Err) ->
+    yio:errorn(<<"Error: Could not read order ids from file '">>, Ids,
+               <<"': ">>, Err),
+    throw(no_ids).
 
-    lager:debug(<<"Creating supervisor tree:~p">>, [Children]),
-    {ok, {{one_for_one, 2, 10}, Children}}.
+process_ids(Cfg, Bin) ->
+    Ids = binary:split(Bin, [<<"\n">>, <<"\r\n">>], [global]),
+    Ids.

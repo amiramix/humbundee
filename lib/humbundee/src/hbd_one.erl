@@ -22,30 +22,53 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(hbd_sup).
--behaviour(supervisor).
+-module(hbd_one).
+-behaviour(gen_server).
 
 %% API
--export([start_link/0]).
+-export([start_link/2]).
+-export([server_name/1]).
 
-%% Supervisor callbacks
--export([init/1]).
+%% gen_server callbacks
+-export([
+         init/1,
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2,
+         terminate/2,
+         code_change/3
+        ]).
 
 -include_lib("yolf/include/yolf.hrl").
 
--define(SERVER, ?MODULE).
+%%% API
+start_link(Server, State) ->
+    ?LOG_WORKER(Server),
+    gen_server:start_link({local, Server}, ?MODULE, [Server, State], []).
 
-start_link() ->
-    ?LOG_SUPERVISOR(?SERVER),
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+server_name(Name) ->
+    Module = atom_to_binary(?MODULE, utf8),
+    Binary = atom_to_binary(Name, utf8),
+    binary_to_atom(<<Module/binary, <<"$">>/binary, Binary/binary>>, utf8).
 
-init([]) ->
-    ?LOG_SUPERVISOR_INIT(?SERVER),
+%%% gen_server callbacks
+init([Server, State]) ->
+    ?LOG_WORKER_INIT(Server),
+    {ok, State}.
 
-    EventMngr = ?WORKER(hbd_event),
-    OneSup = ?SUPERVISOR(hbd_one_sup),
+handle_call(_, _From, State) ->
+    {reply, ok, State}.
 
-    Children = [EventMngr, OneSup],
+handle_cast(_, State) ->
+    {noreply, State}.
 
-    lager:debug(<<"Creating supervisor tree:~p">>, [Children]),
-    {ok, {{one_for_one, 2, 10}, Children}}.
+handle_info(_, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%% Internal methods

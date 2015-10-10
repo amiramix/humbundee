@@ -1,6 +1,5 @@
 lib_clone_deps = \
-	'-b develop $(repo_base_url)/yolf.git' \
-  '-b master $(repo_base_url)/yajler.git'
+	'-b develop $(repo_base_url)/yolf.git'
 
 lib_rm_deps = \
-	yolf yajler
+	yolf

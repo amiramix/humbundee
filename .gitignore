@@ -6,6 +6,7 @@
 /deps/goldrush/
 /deps/lager/
 /deps/node_package/
+/deps/yajler/
 
 /bin/*.boot
 /bin/*.script
@@ -13,7 +14,6 @@
 /lib/*/ebin/
 /lib/*/priv/mibs/
 
-/lib/yajler/
 /lib/yolf/
 
 /erts-[0-9].[0-9]/

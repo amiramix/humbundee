@@ -1,0 +1,7 @@
+{application, deploy,
+ [{description, "Service configuration tool"},
+  {vsn, "0.0.1"},
+  {modules, [=MODULES=]},
+  {registered, []},
+  {applications, [kernel, stdlib]}
+ ]}.
