@@ -60,14 +60,16 @@ check_deps(App) ->
 read_config() ->
     {ok, Url} = application:get_env(humbundee, order_url),
     {ok, Coo} = application:get_env(humbundee, cookie),
-    {ok, Dir} = application:get_env(humbundee, download_location),
+    {ok, Dir} = application:get_env(humbundee, download_dir),
+    {ok, Des} = application:get_env(humbundee, destination_dir),
     Exc = application:get_env(humbundee, exclude_regex_list, []),
     Wrk = application:get_env(humbundee, workers, 20),
-    Cfg = #{url     => Url,
-            cookie  => Coo,
-            dir     => Dir,
+    Cfg = #{url     => yolf:to_binary(Url),
+            cookie  => yolf:to_binary(Coo),
+            in      => yolf:to_binary(Dir),
+            out     => yolf:to_binary(Des),
             regex   => Exc,
-            workers => Wrk},
+            workers => yolf:to_integer(Wrk)},
     yio:in(<<"Read config:">>, endl, Cfg, endl),
     Cfg.
 
@@ -95,28 +97,36 @@ no_home() ->
     throw(no_home).
 
 merge_configs(Cfg0, UserCfg) ->
-    Cfg1 = add_cfg(url,    Cfg0, order_url,          UserCfg),
-    Cfg2 = add_cfg(cookie, Cfg1, cookie,             UserCfg),
-    Cfg3 = add_cfg(dir,    Cfg2, download_location,  UserCfg),
-    Cfg4 = add_cfg(regex,  Cfg3, exclude_regex_list, UserCfg),
-    add_cfg(workers, Cfg4, workers, UserCfg).
+    Cfg1 = add_cfg(url,     Cfg0, order_url,          UserCfg, to_binary),
+    Cfg2 = add_cfg(cookie,  Cfg1, cookie,             UserCfg, to_binary),
+    Cfg3 = add_cfg(in,      Cfg2, download_dir,       UserCfg, to_binary),
+    Cfg4 = add_cfg(out,     Cfg3, destination_dir,    UserCfg, to_binary),
+    Cfg5 = add_cfg(regex,   Cfg4, exclude_regex_list, UserCfg, undefined),
+    _Dum = add_cfg(workers, Cfg5, workers,            UserCfg, to_integer).
 
-add_cfg(MapKey, Map, CfgKey, Cfg) ->
+add_cfg(MapKey, Map, CfgKey, Cfg, ConvFun) ->
     case proplists:get_value(CfgKey, Cfg) of
         undefined -> Map;
-        Value -> Map#{MapKey => Value}
+        Value -> Map#{MapKey => convert(ConvFun, Value)}
     end.
+
+convert(undefined, Value) -> Value;
+convert(ConvFun, Value) -> yolf:ConvFun(Value).
 
 %%------------------------------------------------------------------------------
 
-validate_cfg(#{cookie := Cookie, dir := Dir}) ->
+validate_cfg(#{cookie := Cookie, in := In, out := Out}) ->
     case filelib:is_regular(Cookie) of
         true -> ok;
         false -> no_cookie(Cookie)
     end,
-    case filelib:ensure_dir(Dir) of
+    case ycmd:ensure_dir(In) of
         ok -> ok;
-        {error, _} = Err -> no_download_dir(Dir, Err)
+        {error, _} = Err1 -> no_download_dir(In, Err1)
+    end,
+    case ycmd:ensure_dir(Out) of
+        ok -> ok;
+        {error, _} = Err2 -> no_destination_dir(In, Err2)
     end.
 
 no_cookie(Cookie) ->
@@ -126,7 +136,12 @@ no_cookie(Cookie) ->
 no_download_dir(Dir, Err) ->
     yio:en(<<"Download directory '">>, Dir, <<", doesn't exist and couldn't ">>,
            <<" be created, error: ">>, Err, <<". Exiting.">>),
-    throw(bad_dir).
+    throw(bad_in_dir).
+
+no_destination_dir(Dir, Err) ->
+    yio:en(<<"Destination directory '">>, Dir, <<", doesn't exist and couldn't ">>,
+           <<" be created, error: ">>, Err, <<". Exiting.">>),
+    throw(bad_out_dir).
 
 %%------------------------------------------------------------------------------
 

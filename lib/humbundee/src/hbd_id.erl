@@ -26,7 +26,8 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2]).
+-export([start_link/2,
+         start_download/1]).
 
 %% gen_server callbacks
 -export([
@@ -40,23 +41,26 @@
 
 -include_lib("yolf/include/yolf.hrl").
 
--record(st, {id, url, cookie, regex, dir}).
+-record(st, {id, url, cookie, regex, in, out}).
 
 %%% API
 start_link(Cfg, Id) ->
     ?LOG_WORKER(Id),
     gen_server:start_link(?MODULE, [Cfg, Id], []).
 
+start_download(Pid) ->
+    gen_server:cast(Pid, start).
+
 %%% gen_server callbacks
 init([Cfg, Id]) ->
     ?LOG_WORKER_INIT(Id),
     try
-        Dir = init_dir(maps:get(dir, Cfg), Id),
         {ok, #st{id = Id,
-                 url = maps:get(url, Cfg),
+                 url    = maps:get(url, Cfg),
                  cookie = maps:get(cookie, Cfg),
-                 regex = maps:get(regex, Cfg),
-                 dir = Dir}}
+                 regex  = maps:get(regex, Cfg),
+                 in     = maps:get(in, Cfg),
+                 out    = init_out_dir(maps:get(out, Cfg), Id)}}
     catch
         throw:Term -> {stop, Term}
     end.
@@ -65,6 +69,9 @@ handle_call(_, {Pid, _Tag}, State) ->
     exit(Pid, badarg),
     {noreply, State}.
 
+handle_cast(start, State) ->
+    start(State),
+    {stop, normal, State};
 handle_cast(_, State) ->
     {noreply, State}.
 
@@ -77,14 +84,16 @@ terminate(_Reason, _State) ->
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
-%%% Internal methods
+%%------------------------------------------------------------------------------
+%% Internal methods
 
-init_dir(Dir, Id) ->
+init_out_dir(Dir, Id) ->
     Path = filename:join(Dir, Id),
     case filelib:is_file(Path) of
         false -> ensure_dir(Path, Id);
         true -> already_exists(Path)
-    end.
+    end,
+    Path.
 
 already_exists(Path) ->
     yio:en(<<"Error: The download path '">>, Path, <<"' already exists.">>),
@@ -115,3 +124,9 @@ no_log(FileName, Err) ->
            <<"Error: ">>, Err),
     hbd_event:bad_log_path(FileName, Err),
     throw(Err).
+
+%%------------------------------------------------------------------------------
+
+start(#st{id = Id, url = Url, cookie = Cookie, regex = Regex, out = OutDir}) ->
+    Data = hbd_json:process(Url, Id, Cookie, OutDir),
+    yolog:in(<<"Ending process.">>).

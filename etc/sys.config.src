@@ -30,8 +30,9 @@
   [{user_config, <<".humbundee.conf">>},
    {order_url, <<"https://www.humblebundle.com/api/v1/order/">>},
    {cookie, <<"../=NODE=/humblebundle.cookie">>},
-   {download_location, <<"../=NODE=/humblebundle">>},
-   {exclude_regex_list, [<<".mobi">>]},
+   {download_dir, <<"../=NODE=/downloads">>},
+   {destination_dir, <<"../=NODE=/humblebundle">>},
+   {exclude_regex_list, [{name, <<"MOBI">>}]},
    {workers, 20}
   ]}
 ].

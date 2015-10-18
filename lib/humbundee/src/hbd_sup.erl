@@ -46,10 +46,8 @@ init([Cfg = #{workers := Workers}]) ->
     EventMngr = ?WORKER(hbd_event),
     PoolMngr = ?WORKER2(hbd_pool, Workers),
     ApiMngr  = ?WORKER2(hbd_api, Cfg),
-    IdSup  = ?SUPERVISOR(hbd_id_sup),
-    OneSup = ?SUPERVISOR(hbd_one_sup),
 
-    Children = [EventMngr, PoolMngr, ApiMngr, IdSup, OneSup],
+    Children = [EventMngr, PoolMngr, ApiMngr],
 
     lager:debug(<<"Creating supervisor tree:~p">>, [Children]),
     {ok, {{one_for_one, 2, 10}, Children}}.

@@ -40,6 +40,8 @@
 
 -include_lib("yolf/include/yolf.hrl").
 
+-record(st, {max, ids, q}).
+
 %%% API
 start_link(Workers) ->
     ?LOG_WORKER(?MODULE),
@@ -48,7 +50,7 @@ start_link(Workers) ->
 %%% gen_server callbacks
 init([Workers]) ->
     ?LOG_WORKER_INIT(?MODULE),
-    {ok, Workers}.
+    {ok, #st{max = Workers, ids = #{}, q = queue:new()}}.
 
 handle_call(_, _From, State) ->
     {reply, ok, State}.
