@@ -21,6 +21,10 @@
 # Enable CTRL+D instead of CTRL+C
 +Bi
 
+# Use UTF-8 file names and allow unicode printable characters
++fnue
++pc unicode
+
 ## Increase number of concurrent ports/sockets
 -env ERL_MAX_PORTS 64000
 

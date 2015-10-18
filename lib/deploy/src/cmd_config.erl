@@ -8,8 +8,7 @@
 
 subfolders() ->
     {ok,
-     [<<"torrents">>,
-      <<"downloads">>]}.
+     [<<"humblebundle">>]}.
 
 key_replace(Base, Name, Offset, RunVars) ->
     {_, Host} = proplists:get_value(hostname, RunVars),

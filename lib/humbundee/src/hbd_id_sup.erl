@@ -22,11 +22,28 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(humbundee).
+-module(hbd_id_sup).
+-behaviour(supervisor).
 
--export([download/1]).
+%% API
+-export([start_link/0, start_child/2]).
 
-download(Id) when is_binary(Id) ->
-    hbd_api:download(Id);
-download(Other) ->
-    download(yolf:to_binary(Other)).
+%% Supervisor callbacks
+-export([init/1]).
+
+-include_lib("yolf/include/yolf.hrl").
+
+-define(SERVER, ?MODULE).
+
+start_link() ->
+    ?LOG_SUPERVISOR(?SERVER),
+    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+
+init([]) ->
+    ?LOG_SUPERVISOR_INIT(?SERVER),
+    Child = ?WORKER(hbd_id),
+    {ok, {{simple_one_for_one, 3, 30}, [Child]}}.
+
+start_child(Cfg, Id) ->
+    ylog:in(<<" == hbd_id_sup: start child for Id: ">>, Id),
+    supervisor:start_child(?SERVER, [Cfg, Id]).

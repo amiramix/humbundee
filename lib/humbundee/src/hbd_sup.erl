@@ -26,7 +26,7 @@
 -behaviour(supervisor).
 
 %% API
--export([start_link/0]).
+-export([start_link/1]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -34,18 +34,22 @@
 -include_lib("yolf/include/yolf.hrl").
 
 -define(SERVER, ?MODULE).
+-define(WORKER2(I, Arg), {I, {I, start_link, [Arg]}, permanent, ?SHUTDOWN_TIMEOUT, worker, [I]}).
 
-start_link() ->
+start_link(Cfg) ->
     ?LOG_SUPERVISOR(?SERVER),
-    supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+    supervisor:start_link({local, ?SERVER}, ?MODULE, [Cfg]).
 
-init([]) ->
+init([Cfg = #{workers := Workers}]) ->
     ?LOG_SUPERVISOR_INIT(?SERVER),
 
     EventMngr = ?WORKER(hbd_event),
+    PoolMngr = ?WORKER2(hbd_pool, Workers),
+    ApiMngr  = ?WORKER2(hbd_api, Cfg),
+    IdSup  = ?SUPERVISOR(hbd_id_sup),
     OneSup = ?SUPERVISOR(hbd_one_sup),
 
-    Children = [EventMngr, OneSup],
+    Children = [EventMngr, PoolMngr, ApiMngr, IdSup, OneSup],
 
     lager:debug(<<"Creating supervisor tree:~p">>, [Children]),
     {ok, {{one_for_one, 2, 10}, Children}}.

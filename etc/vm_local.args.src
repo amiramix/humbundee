@@ -10,6 +10,10 @@
 # Enable CTRL+D instead of CTRL+C
 +Bi
 
+# Use UTF-8 file names and allow unicode printable characters
++fnue
++pc unicode
+
 ## Set the location of crash dumps
 -env ERL_CRASH_DUMP "tmp/"
 

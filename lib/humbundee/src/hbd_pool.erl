@@ -22,11 +22,47 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(humbundee).
+-module(hbd_pool).
+-behaviour(gen_server).
 
--export([download/1]).
+%% API
+-export([start_link/1]).
 
-download(Id) when is_binary(Id) ->
-    hbd_api:download(Id);
-download(Other) ->
-    download(yolf:to_binary(Other)).
+%% gen_server callbacks
+-export([
+         init/1,
+         handle_call/3,
+         handle_cast/2,
+         handle_info/2,
+         terminate/2,
+         code_change/3
+        ]).
+
+-include_lib("yolf/include/yolf.hrl").
+
+%%% API
+start_link(Workers) ->
+    ?LOG_WORKER(?MODULE),
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [Workers], []).
+
+%%% gen_server callbacks
+init([Workers]) ->
+    ?LOG_WORKER_INIT(?MODULE),
+    {ok, Workers}.
+
+handle_call(_, _From, State) ->
+    {reply, ok, State}.
+
+handle_cast(_, State) ->
+    {noreply, State}.
+
+handle_info(_, State) ->
+    {noreply, State}.
+
+terminate(_Reason, _State) ->
+    ok.
+
+code_change(_OldVsn, State, _Extra) ->
+    {ok, State}.
+
+%%% Internal methods

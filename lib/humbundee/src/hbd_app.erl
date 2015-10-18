@@ -28,8 +28,21 @@
 -export([start/2, stop/1]).
 
 start(_StartType, _StartArgs) ->
-    yolf_log:init(),
-    case hbd_sup:start_link() of
+    ylog:init(),
+    case get_cfg() of
+        {error, _} = Err -> Err;
+        Cfg -> start_sup(Cfg)
+    end.
+
+get_cfg() ->
+    try
+        hbd_cfg:setup()
+    catch
+        throw:Term -> {error, Term}
+    end.
+
+start_sup(Cfg) ->
+    case hbd_sup:start_link(Cfg) of
         {ok, Pid} ->
             hbd_event_logger:add_handler(),
             {ok, Pid};
@@ -38,5 +51,5 @@ start(_StartType, _StartArgs) ->
     end.
 
 stop(_State) ->
-    yolf_log:stop(),
+    ylog:stop(),
     ok.

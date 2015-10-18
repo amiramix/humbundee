@@ -22,12 +22,12 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(hbd_one).
+-module(hbd_api).
 -behaviour(gen_server).
 
 %% API
--export([start_link/2]).
--export([server_name/1]).
+-export([start_link/1,
+         download/1]).
 
 %% gen_server callbacks
 -export([
@@ -41,24 +41,29 @@
 
 -include_lib("yolf/include/yolf.hrl").
 
-%%% API
-start_link(Server, State) ->
-    ?LOG_WORKER(Server),
-    gen_server:start_link({local, Server}, ?MODULE, [Server, State], []).
+-record(st, {cfg, ids, refs}).
 
-server_name(Name) ->
-    Module = atom_to_binary(?MODULE, utf8),
-    Binary = atom_to_binary(Name, utf8),
-    binary_to_atom(<<Module/binary, <<"$">>/binary, Binary/binary>>, utf8).
+%%% API
+start_link(Cfg) ->
+    ?LOG_WORKER(?MODULE),
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [Cfg], []).
+
+download(Id) when is_binary(Id) ->
+    gen_server:cast(?MODULE, {download, Id});
+download(_) ->
+    yio:en(<<"Please specify Id as binary">>).
 
 %%% gen_server callbacks
-init([Server, State]) ->
-    ?LOG_WORKER_INIT(Server),
-    {ok, State}.
+init([Cfg]) ->
+    ?LOG_WORKER_INIT(?MODULE),
+    {ok, #st{cfg = Cfg, ids = #{}, refs = #{}}}.
 
 handle_call(_, {Pid, _Tag}, State) ->
     exit(Pid, badarg),
     {noreply, State}.
+
+handle_cast({download, Id}, State) ->
+    {noreply, download_id(Id, State)};
 
 handle_cast(_, State) ->
     {noreply, State}.
@@ -73,3 +78,22 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal methods
+download_id(Id, #st{ids = Ids} = State) ->
+    case maps:is_key(Id, Ids) of
+        true ->
+            yio:en(<<"Id '">>, Id, <<"' already downloading. Ignoring...">>),
+            State;
+        false ->
+            start_download(Id, State)
+    end.
+
+start_download(Id, #st{cfg = Cfg, ids = Ids, refs = Refs} = State) ->
+    case hbd_id_sup:start_child(Cfg, Id) of
+        {ok, Pid} ->
+            yio:in(<<"Started downloading for ID: ">>, Id),
+            Ref = monitor(process, Pid),
+            State#st{ids = Ids#{Id => Pid}, refs = Refs#{Ref => Id}};
+        {error, _} = Err ->
+            yio:en(<<"Can't start the download, error: ">>, Err, endl),
+            State
+    end.

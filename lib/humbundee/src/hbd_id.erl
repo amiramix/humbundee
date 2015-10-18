@@ -22,12 +22,11 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(hbd_one).
+-module(hbd_id).
 -behaviour(gen_server).
 
 %% API
 -export([start_link/2]).
--export([server_name/1]).
 
 %% gen_server callbacks
 -export([
@@ -41,20 +40,26 @@
 
 -include_lib("yolf/include/yolf.hrl").
 
-%%% API
-start_link(Server, State) ->
-    ?LOG_WORKER(Server),
-    gen_server:start_link({local, Server}, ?MODULE, [Server, State], []).
+-record(st, {id, url, cookie, regex, dir}).
 
-server_name(Name) ->
-    Module = atom_to_binary(?MODULE, utf8),
-    Binary = atom_to_binary(Name, utf8),
-    binary_to_atom(<<Module/binary, <<"$">>/binary, Binary/binary>>, utf8).
+%%% API
+start_link(Cfg, Id) ->
+    ?LOG_WORKER(Id),
+    gen_server:start_link(?MODULE, [Cfg, Id], []).
 
 %%% gen_server callbacks
-init([Server, State]) ->
-    ?LOG_WORKER_INIT(Server),
-    {ok, State}.
+init([Cfg, Id]) ->
+    ?LOG_WORKER_INIT(Id),
+    try
+        Dir = init_dir(maps:get(dir, Cfg), Id),
+        {ok, #st{id = Id,
+                 url = maps:get(url, Cfg),
+                 cookie = maps:get(cookie, Cfg),
+                 regex = maps:get(regex, Cfg),
+                 dir = Dir}}
+    catch
+        throw:Term -> {stop, Term}
+    end.
 
 handle_call(_, {Pid, _Tag}, State) ->
     exit(Pid, badarg),
@@ -73,3 +78,40 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal methods
+
+init_dir(Dir, Id) ->
+    Path = filename:join(Dir, Id),
+    case filelib:is_file(Path) of
+        false -> ensure_dir(Path, Id);
+        true -> already_exists(Path)
+    end.
+
+already_exists(Path) ->
+    yio:en(<<"Error: The download path '">>, Path, <<"' already exists.">>),
+    hbd_event:already_exists(Path),
+    throw(already_exists).
+
+ensure_dir(Path, Id) ->
+    FileName = filename:join(Path, <<Id/binary, <<".log">>/binary>>),
+    case filelib:ensure_dir(FileName) of
+        ok -> start_log(FileName);
+        {error, _} = Err -> bad_dir(Path, Err)
+    end.
+
+bad_dir(Path, Err) ->
+    yio:en(<<"Can't create the download folder '">>, Path, <<"'.">>, endl,
+           <<"Error: ">>, Err),
+    hbd_event:bad_download_dir(Path, Err),
+    throw(Err).
+
+start_log(FileName) ->
+    case yolog:init(FileName) of
+        ok -> ok;
+        Err -> no_log(FileName, Err)
+    end.
+
+no_log(FileName, Err) ->
+    yio:en(<<"Can't open log file '">>, FileName, <<"'.">>, endl,
+           <<"Error: ">>, Err),
+    hbd_event:bad_log_path(FileName, Err),
+    throw(Err).

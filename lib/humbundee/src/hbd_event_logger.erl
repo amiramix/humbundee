@@ -44,11 +44,17 @@ init([]) ->
     ?LOG_WORKER_INIT(?MODULE),
     {ok, #state{}}.
 
-handle_event({create, {Key, Value}}, State) ->
-    error_logger:info_msg("create(~w, ~w)~n", [Key, Value]),
+handle_event({already_exists, Path}, State) ->
+    error_logger:error_msg(
+      "Error: Download path '~p' already exists.~n", [Path]),
     {ok, State};
-handle_event({delete, Key}, State) ->
-    error_logger:info_msg("delete(~w)~n", [Key]),
+handle_event({bad_download_dir, Path, Err}, State) ->
+    error_logger:error_msg(
+      "Error when creating download folder '~p': ~p~n", [Path, Err]),
+    {ok, State};
+handle_event({bad_log_path, Path, Err}, State) ->
+    error_logger:error_msg(
+      "Error writing log file '~p': ~p~n", [Path, Err]),
     {ok, State}.
 
 handle_call(_Request, State) ->

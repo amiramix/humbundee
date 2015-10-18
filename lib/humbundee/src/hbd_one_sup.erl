@@ -56,9 +56,9 @@ add(Name, Cfg) ->
     end.
 
 add_child(Server, State) ->
-    lager:info(<<" == hbd_one_sup: add child:~p">>, [Server]),
+    ylog:in(<<" == hbd_one_sup: add child: ">>, Server),
     supervisor:start_child(?SERVER, [Server, State]).
 
 delete_child(Server, Pid) ->
-    lager:info(<<" == hbd_one_sup: delete child:~p">>, [Server]),
+    ylog:in(<<" == hbd_one_sup: delete child: ">>, Server),
     ok = supervisor:terminate_child(?SERVER, Pid).

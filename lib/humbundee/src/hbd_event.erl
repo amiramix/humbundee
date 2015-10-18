@@ -26,9 +26,11 @@
 
 -export([start_link/0,
          add_handler/2,
-         delete_handler/2,
-         create/2,
-         delete/1]).
+         delete_handler/2]).
+
+-export([already_exists/1,
+         bad_download_dir/2,
+         bad_log_path/2]).
 
 -include_lib("yolf/include/yolf.hrl").
 
@@ -39,13 +41,18 @@ start_link() ->
     gen_event:start_link({local, ?SERVER}).
 
 add_handler(Handler, Args) ->
-    gen_event:add_handler(?SERVER, Handler, Args).
+    ok = gen_event:add_handler(?SERVER, Handler, Args).
 
 delete_handler(Handler, Args) ->
-    gen_event:delete_handler(?SERVER, Handler, Args).
+    ok = gen_event:delete_handler(?SERVER, Handler, Args).
 
-create(Key, Value) ->
-    gen_event:notify(?SERVER, {create, {Key, Value}}).
+%%------------------------------------------------------------------------------
 
-delete(Key) ->
-    gen_event:notify(?SERVER, {delete, Key}).
+already_exists(Path) ->
+    gen_event:notify(?SERVER, {already_exists, Path}).
+
+bad_download_dir(Path, Err) ->
+    gen_event:notify(?SERVER, {bad_download_dir, Path, Err}).
+
+bad_log_path(Path, Err) ->
+    gen_event:notify(?SERVER, {bad_log_path, Path, Err}).
