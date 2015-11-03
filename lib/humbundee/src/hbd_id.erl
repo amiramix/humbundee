@@ -26,8 +26,11 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/2,
-         start_download/1]).
+-export([
+         start_link/2,
+         start_download/1,
+         torrent_added/2
+        ]).
 
 %% gen_server callbacks
 -export([
@@ -51,9 +54,13 @@ start_link(Cfg, Id) ->
 start_download(Pid) ->
     gen_server:cast(Pid, start).
 
+torrent_added(Pid, FileName) ->
+    gen_server:cast(Pid, {added, FileName}).
+
 %%% gen_server callbacks
 init([Cfg, Id]) ->
     ?LOG_WORKER_INIT(Id),
+    process_flag(trap_exit, true),
     try
         {ok, #st{id = Id,
                  url    = maps:get(url, Cfg),
@@ -65,16 +72,35 @@ init([Cfg, Id]) ->
         throw:Term -> {stop, Term}
     end.
 
+handle_call({started, Pid, Name}, _From, State) ->
+    link(Pid),
+    log_download(Pid, Name),
+    {reply, ok, State};
 handle_call(_, {Pid, _Tag}, State) ->
     exit(Pid, badarg),
     {noreply, State}.
 
 handle_cast(start, State) ->
     start(State),
-    {stop, normal, State};
+    {noreply, State};
+handle_cast({log_torrent, Pid, Cmd, Result}, State) ->
+    log_torrent(Pid, Cmd, Result),
+    {noreply, State};
+handle_cast({bad_torrent, Pid, Name}, State) ->
+    log_bad_torrent(Pid, Name),
+    {noreply, State};
+handle_cast({excluded, Pid, Match, Subject}, State) ->
+    log_excluded(Pid, Match, Subject),
+    {noreply, State};
+handle_cast({added, FileName}, State) ->
+    log_torrent_added(FileName),
+    {noreply, State};
 handle_cast(_, State) ->
     {noreply, State}.
 
+handle_info({'EXIT', Pid, Reason}, State) ->
+    log_exit(Pid, Reason),
+    {noreply, State};
 handle_info(_, State) ->
     {noreply, State}.
 
@@ -85,13 +111,53 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%------------------------------------------------------------------------------
+%% Internal API
+download_started(Pid, NewPid, Name) ->
+    gen_server:call(Pid, {started, NewPid, Name}).
+
+torrent_finished(Pid, NewPid, Cmd, Result) ->
+    gen_server:cast(Pid, {log_torrent, NewPid, Cmd, Result}).
+
+bad_torrent(Pid, NewPid, Name) ->
+    gen_server:cast(Pid, {bad_torrent, NewPid, Name}).
+
+found_excluded(Pid, NewPid, Match, Subject) ->
+    gen_server:cast(Pid, {excluded, NewPid, Match, Subject}).
+
+%%------------------------------------------------------------------------------
+
+log_download(Pid, Name) ->
+    yolog:tin(<<"Started pid: ">>, Pid, <<" to download: ">>, Name).
+
+log_torrent(Pid, Cmd, ok) ->
+    yolog:tin(<<"Success, process ">>, Pid,
+              <<" downloaded torrent with command: ">>, endl, Cmd);
+log_torrent(Pid, Cmd, Result) ->
+    yolog:tin(<<"Error: ">>, Result, <<", process ">>, Pid,
+              <<" couldn't download torrent with command: ">>, endl, Cmd).
+
+log_exit(Pid, Reason) ->
+    yolog:tin(<<"Process ">>, Pid, <<" terminated with reason ">>, Reason).
+
+log_bad_torrent(Pid, Name) ->
+    yolog:tin(<<"Error, process ">>, Pid,
+              <<" can't find downloaded torrent ">>, Name).
+
+log_excluded(Pid, Match, Subject) ->
+    yolog:tin(<<"Process ">>, Pid, <<" finished, exluded pattern '">>, Match,
+              <<"' found in subject '">>, Subject, <<"'.">>).
+
+log_torrent_added(FileName) ->
+    yolog:tin(<<"Torrent '">>, FileName, <<"' added to the download queue">>).
+
+%%------------------------------------------------------------------------------
 %% Internal methods
 
 init_out_dir(Dir, Id) ->
     Path = filename:join(Dir, Id),
     case filelib:is_file(Path) of
-        false -> ensure_dir(Path, Id);
-        true -> already_exists(Path)
+        true -> already_exists(Path);
+        false -> ensure_dir(Path, Id)
     end,
     Path.
 
@@ -127,6 +193,80 @@ no_log(FileName, Err) ->
 
 %%------------------------------------------------------------------------------
 
-start(#st{id = Id, url = Url, cookie = Cookie, regex = Regex, out = OutDir}) ->
+start(#st{id = Id, url = Url, cookie = Cookie, out = OutDir} = St) ->
     Data = hbd_json:process(Url, Id, Cookie, OutDir),
-    yolog:in(<<"Ending process.">>).
+    TorrentDir = filename:join(OutDir, <<"torrents">>),
+    ok = yocmd:mk_dir(TorrentDir),
+    lists:foreach(fun(X) -> spawn_folder(TorrentDir, X, St) end, Data).
+
+spawn_folder(TrDir, Data, St) ->
+    Folder = filename:join(maps:get(folder, Data), maps:get(name, Data)),
+    Fun = fun() -> start_folder(self(), TrDir, Folder, Data, St) end,
+    Pid = proc_lib:spawn_link(Fun),
+    log_download(Pid, Folder).
+
+start_folder(Parent, TrDir, Folder, Data, St) ->
+    proc_lib:init_ack(Parent, {ok, self()}),
+    Downloads = maps:get(downloads, Data),
+    Fun = fun(X) -> spawn_one(Parent, TrDir, Folder, X, St) end,
+    lists:foreach(Fun, Downloads).
+
+spawn_one(LogPid, TrDir, Folder, Download, St) ->
+    Fun = fun() -> start_one(self(), LogPid, TrDir, Folder, Download, St) end,
+    Pid = proc_lib:spawn_link(Fun),
+    Name = maps:get(name, Download),
+    ok = download_started(LogPid, Pid, filename:join(Folder, Name)),
+    unlink(Pid).
+
+start_one(Parent, LogPid, TrDir, Folder, Download, #st{regex = RegEx} = St) ->
+    proc_lib:init_ack(Parent, {ok, self()}),
+    Sha1 = maps:get(sha1, Download),
+    Size = maps:get(size, Download),
+    Name = maps:get(name, Download),
+    Url = maps:get(url, Download),
+    Torrent = maps:get(torrent, Download),
+    exit_if_excluded(LogPid, RegEx, {Name, Url, Torrent}),
+    TrCmd = torrent_cmd(TrDir, Torrent, St#st.cookie),
+    start_torrent(LogPid, TrCmd, {Folder, Name, Sha1, Size}, St).
+
+exit_if_excluded(LogPid, [{name, Re, Opts} | T], {Name, _, _} = Info) ->
+    check_excluded(LogPid, Name, re:run(Name, Re, Opts)),
+    exit_if_excluded(LogPid, T, Info);
+exit_if_excluded(LogPid, [{link, Re, Opts} | T], {_, Url, Torrent} = Info) ->
+    check_excluded(LogPid, Url, re:run(Url, Re, Opts)),
+    check_excluded(LogPid, Torrent, re:run(Torrent, Re, Opts)),
+    exit_if_excluded(LogPid, T, Info);
+exit_if_excluded(LogPid, [{any, Re, Opts} | T], Info) ->
+    Fun = fun(X) -> check_excluded(LogPid, X, re:run(X, Re, Opts)) end,
+    lists:foreach(Fun, tuple_to_list(Info)),
+    exit_if_excluded(LogPid, T, Info).
+
+check_excluded(_LogPid, _Subject, nomatch) ->
+    ok;
+check_excluded(LogPid, Subject, {match, Captured}) ->
+    found_excluded(LogPid, self(), Captured, Subject),
+    exit(normal).
+
+torrent_cmd(TrDir, Torrent, Cookie) ->
+    {ok, {_, _, _, _, Path, _}} = http_uri:parse(Torrent),
+    File = lists:last(filename:split(Path)),
+    TorrentFile = filename:join(TrDir, File),
+    Cmd = << <<"wget -q --load-cookies ">>/binary, Cookie/binary,
+             <<" -P ">>/binary, TrDir/binary, <<" ">>/binary, Torrent/binary >>,
+    {Cmd, TorrentFile}.
+
+start_torrent(LogPid, {Cmd, TrFile}, FileInfo, #st{in = InDir, out = OutDir}) ->
+    case yexec:sh_cmd(Cmd) of
+        {0, _} ->
+            torrent_finished(LogPid, self(), Cmd, ok),
+            add_torrent(LogPid, TrFile, {InDir, OutDir}, FileInfo);
+        Err ->
+            torrent_finished(LogPid, self(), Cmd, Err),
+            exit(no_torrent)
+    end.
+
+add_torrent(LogPid, TrFile, InOut, FileInfo) ->
+    case filelib:is_regular(TrFile) of
+        true -> hbd_pool:add_torrent(LogPid, TrFile, InOut, FileInfo);
+        false -> bad_torrent(LogPid, self(), TrFile)
+    end.

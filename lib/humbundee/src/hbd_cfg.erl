@@ -62,17 +62,26 @@ read_config() ->
     {ok, Coo} = application:get_env(humbundee, cookie),
     {ok, Dir} = application:get_env(humbundee, download_dir),
     {ok, Des} = application:get_env(humbundee, destination_dir),
-    Exc = application:get_env(humbundee, exclude_regex_list, []),
     Wrk = application:get_env(humbundee, workers, 20),
     Cfg = #{url     => yolf:to_binary(Url),
             cookie  => yolf:to_binary(Coo),
             in      => yolf:to_binary(Dir),
             out     => yolf:to_binary(Des),
-            regex   => Exc,
+            regex   => read_regex(),
             workers => yolf:to_integer(Wrk)},
     yio:in(<<"Read config:">>, endl, Cfg, endl),
     Cfg.
 
+read_regex() ->
+    Exc = application:get_env(humbundee, exclude_regex_list, []),
+    [compile_re(X) || X <- Exc].
+
+compile_re({name, Re}) -> compile_re({name, Re, []});
+compile_re({name, Re, Opts}) -> {name, re:compile(Re, Opts), Opts};
+compile_re({link, Re}) -> compile_re({link, Re, []});
+compile_re({link, Re, Opts}) -> {link, re:compile(Re, Opts), Opts};
+compile_re({Re, Opts}) -> {any, re:compile(Re, Opts), Opts};
+compile_re(Re) -> compile_re({Re, []}).
 
 add_user_config(Cfg) ->
     Name = application:get_env(humbundee, user_config, <<".humbundee.conf">>),

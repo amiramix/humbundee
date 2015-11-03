@@ -26,7 +26,10 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1]).
+-export([
+         start_link/1,
+         add_torrent/4
+        ]).
 
 %% gen_server callbacks
 -export([
@@ -40,24 +43,37 @@
 
 -include_lib("yolf/include/yolf.hrl").
 
+-define(INTERVAL, 1000).
 -record(st, {max, ids, q}).
+-record(d, {from, logpid, torrent, in, out, folder, name, sha1, size}).
 
 %%% API
 start_link(Workers) ->
     ?LOG_WORKER(?MODULE),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Workers], []).
 
+add_torrent(LogPid, TrFile, InOut, FileInfo) ->
+    gen_server:call({add, LogPid, TrFile, InOut, FileInfo}).
+
 %%% gen_server callbacks
 init([Workers]) ->
     ?LOG_WORKER_INIT(?MODULE),
+    erlang:send_after(?INTERVAL, self(), trigger),
     {ok, #st{max = Workers, ids = #{}, q = queue:new()}}.
 
+handle_call({add, LogPid, TrFile, InOut, FileInfo}, From, #st{q = Q} = St) ->
+    NewQ = queue:in(mk_d(From, LogPid, TrFile, InOut, FileInfo), Q),
+    hbd_id:torrent_added(LogPid, TrFile),
+    {noreply, St#st{q = NewQ}};
 handle_call(_, _From, State) ->
     {reply, ok, State}.
 
 handle_cast(_, State) ->
     {noreply, State}.
 
+handle_info(trigger, #st{q = Q} = St) ->
+    erlang:send_after(?INTERVAL, self(), trigger),
+    {noreply, St#st{q = consume_q(queue:out(Q))}};
 handle_info(_, State) ->
     {noreply, State}.
 
@@ -68,3 +84,15 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal methods
+
+mk_d(From, LogPid, TrFile, {InDir, OutDir}, {Folder, Name, Sha1, Size}) ->
+    #d{from = From, logpid = LogPid, torrent = TrFile,
+       in = InDir, out = OutDir,
+       folder = Folder, name = Name, sha1 = Sha1, size = Size}.
+
+consume_q({empty, Q}) ->
+    ylog:tin(<<"Download queue is empty...">>),
+    Q;
+consume_q({{value, #d{from = From}}, Q}) ->
+    gen_server:reply(From, ok),
+    Q.
