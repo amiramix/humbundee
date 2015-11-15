@@ -32,7 +32,11 @@
    {cookie, <<"../=NODE=/humblebundle.cookie">>},
    {download_dir, <<"../=NODE=/downloads">>},
    {destination_dir, <<"../=NODE=/humblebundle">>},
-   {exclude_regex_list, [{name, <<"MOBI">>}]},
+   {exclude_regex_list,
+    [
+     {name, <<"^MOBI$">>, [caseless]},
+     {platform, <<"^mac$">>}
+    ]},
    {workers, 20}
   ]}
 ].

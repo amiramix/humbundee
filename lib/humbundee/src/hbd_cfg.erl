@@ -28,8 +28,8 @@
 
 setup() ->
     check_deps(),
-    Cfg0 = read_config(),
-    Cfg1 = add_user_config(Cfg0),
+    #{regex := RegexL} = Cfg0 = add_user_config(read_config()),
+    Cfg1 = Cfg0#{regex => process_regex(RegexL)},
     validate_cfg(Cfg1),
     start_qbt(),
     Cfg1.
@@ -67,21 +67,10 @@ read_config() ->
             cookie  => yolf:to_binary(Coo),
             in      => yolf:to_binary(Dir),
             out     => yolf:to_binary(Des),
-            regex   => read_regex(),
+            regex   => application:get_env(humbundee, exclude_regex_list, []),
             workers => yolf:to_integer(Wrk)},
     yio:in(<<"Read config:">>, endl, Cfg, endl),
     Cfg.
-
-read_regex() ->
-    Exc = application:get_env(humbundee, exclude_regex_list, []),
-    [compile_re(X) || X <- Exc].
-
-compile_re({name, Re}) -> compile_re({name, Re, []});
-compile_re({name, Re, Opts}) -> {name, re:compile(Re, Opts), Opts};
-compile_re({link, Re}) -> compile_re({link, Re, []});
-compile_re({link, Re, Opts}) -> {link, re:compile(Re, Opts), Opts};
-compile_re({Re, Opts}) -> {any, re:compile(Re, Opts), Opts};
-compile_re(Re) -> compile_re({Re, []}).
 
 add_user_config(Cfg) ->
     Name = application:get_env(humbundee, user_config, <<".humbundee.conf">>),
@@ -121,6 +110,24 @@ add_cfg(MapKey, Map, CfgKey, Cfg, ConvFun) ->
 
 convert(undefined, Value) -> Value;
 convert(ConvFun, Value) -> yolf:ConvFun(Value).
+
+%%------------------------------------------------------------------------------
+
+process_regex(RegexList) ->
+    [compile_re(X) || X <- RegexList].
+
+compile_re({name, Re}) -> compile_re({name, Re, []});
+compile_re({name, Re, Opts}) -> {name, compile_re1(Re, Opts), Opts};
+compile_re({link, Re}) -> compile_re({link, Re, []});
+compile_re({link, Re, Opts}) -> {link, compile_re1(Re, Opts), Opts};
+compile_re({platform, Re}) -> compile_re({platform, Re, []});
+compile_re({platform, Re, Opts}) -> {platform, compile_re1(Re, Opts), Opts};
+compile_re({Re, Opts}) -> {any, compile_re1(Re, Opts), Opts};
+compile_re(Re) -> compile_re({Re, []}).
+
+compile_re1(Re, Opts) ->
+    {ok, MP} = re:compile(Re, Opts),
+    MP.
 
 %%------------------------------------------------------------------------------
 

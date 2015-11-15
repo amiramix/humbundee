@@ -72,24 +72,27 @@ is_downloads(List) ->
     end.
 
 cleanup(X) ->
-    Name = proplists:get_value(<<"human_name">>, X),
     Folder = clean_payee(proplists:get_value(<<"payee">>, X)),
+    Title = proplists:get_value(<<"human_name">>, X),
     Downloads = clean_downloads(proplists:get_value(<<"downloads">>, X), []),
-    #{name => Name, folder => Folder, downloads => Downloads}.
+    #{folder => Folder, title => Title, downloads => Downloads}.
 
 clean_payee(X) ->
     proplists:get_value(<<"human_name">>, X).
 
-clean_downloads([H|T], Acc) -> clean_downloads(T, clean_download(H, Acc));
+clean_downloads([H|T], Acc) -> clean_downloads(T, [clean_download(H)|Acc]);
 clean_downloads([], Acc) -> Acc.
 
-clean_download(X, Acc) ->
-    clean_struct(proplists:get_value(<<"download_struct">>, X), Acc).
+clean_download(X) ->
+    MachineName = proplists:get_value(<<"machine_name">>, X),
+    Platform = proplists:get_value(<<"platform">>, X),
+    Structs = clean_structs(proplists:get_value(<<"download_struct">>, X), []),
+    #{machname => MachineName, platform => Platform, structs => Structs}.
 
-clean_struct([H|T], Acc) -> clean_struct(T, [clean_one(H)|Acc]);
-clean_struct([], Acc) -> Acc.
+clean_structs([H|T], Acc) -> clean_structs(T, [clean_struct(H)|Acc]);
+clean_structs([], Acc) -> Acc.
 
-clean_one(X) ->
+clean_struct(X) ->
     Sha1 = proplists:get_value(<<"sha1">>, X),
     Md5 = proplists:get_value(<<"md5">>, X),
     Size = proplists:get_value(<<"file_size">>, X),
@@ -99,4 +102,5 @@ clean_one(X) ->
       name => Name, url => Url, torrent => Torrent}.
 
 clean_url(X) ->
-    {proplists:get_value(<<"web">>, X), proplists:get_value(<<"bittorrent">>, X)}.
+    {proplists:get_value(<<"web">>, X),
+     proplists:get_value(<<"bittorrent">>, X)}.
