@@ -28,7 +28,7 @@
 %% API
 -export([
          start_link/1,
-         do_torrent/2
+         do_torrent/3
         ]).
 
 %% gen_server callbacks
@@ -52,8 +52,8 @@ start_link(Workers) ->
     ?LOG_WORKER(?MODULE),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Workers], []).
 
-do_torrent(TrFile, DRec) ->
-    gen_server:call({do, TrFile, DRec}).
+do_torrent(TrFile, InDir, DRec) ->
+    gen_server:call(?MODULE, {do, TrFile, InDir, DRec}, infinity).
 
 %%% gen_server callbacks
 init([Workers]) ->
@@ -61,10 +61,10 @@ init([Workers]) ->
     erlang:send_after(?INTERVAL, self(), trigger),
     {ok, #st{max = Workers, ids = #{}, q = queue:new()}}.
 
-handle_call({do, TrFile, DRec}, From, #st{q = Q} = St) ->
+handle_call({do, TrFile, _InDir, DRec}, From, #st{q = Q} = St) ->
     Download = DRec#d{from = From},
     NewQ = queue:in(Download, Q),
-    hbd_id:torrent_added(DRec#d.logpid, TrFile),
+    hbd_id:torrent_added(DRec#d.logpid, TrFile, DRec#d.file),
     {noreply, St#st{q = NewQ}};
 handle_call(_, _From, State) ->
     {reply, ok, State}.
@@ -88,7 +88,7 @@ code_change(_OldVsn, State, _Extra) ->
 
 next_d({empty, Q}) ->
     Q;
-next_d({{value, #d{from = From, path = Path}}, Q}) ->
-    ylog:tin(<<"Completing: ">>, Path),
+next_d({{value, #d{from = From, path = Path, file = File}}, Q}) ->
+    ylog:tin(<<"Completing: ">>, filename:join(Path, File)),
     gen_server:reply(From, ok),
     Q.

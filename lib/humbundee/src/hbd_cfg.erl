@@ -36,9 +36,8 @@ setup() ->
 
 check_deps() ->
     IsWget  = is_cmd(<<"wget">>),
-    IsTrans = is_cmd(<<"transmission-show">>),
     IsBt    = is_cmd(<<"qbittorrent-nox">>),
-    All = [IsWget, IsTrans, IsBt],
+    All = [IsWget, IsBt],
     Err = [X || {false, X} <- All],
     check_deps(Err).
 
@@ -48,9 +47,8 @@ is_cmd(App) ->
 check_deps([]) ->
     true;
 check_deps(App) ->
-    yio:errorn(<<"Error: Humbundee requires that wget, transmission-show ">>,
-               <<"(part of transmission-cli) and qbittorrent-nox are\n">>,
-               <<"installed in the system. The following applications ">>,
+    yio:errorn(<<"Error: Humbundee requires that wget and qbittorrent-nox \n">>,
+               <<"are installed in the system. The following applications ">>,
                <<"couldn't be found:">>),
     [yio:error(<<X/binary, <<"\n">>/binary >>) || X <- App],
     throw(no_deps).
@@ -116,18 +114,33 @@ convert(ConvFun, Value) -> yolf:ConvFun(Value).
 process_regex(RegexList) ->
     [compile_re(X) || X <- RegexList].
 
-compile_re({name, Re}) -> compile_re({name, Re, []});
-compile_re({name, Re, Opts}) -> {name, compile_re1(Re, Opts), Opts};
-compile_re({link, Re}) -> compile_re({link, Re, []});
-compile_re({link, Re, Opts}) -> {link, compile_re1(Re, Opts), Opts};
-compile_re({platform, Re}) -> compile_re({platform, Re, []});
-compile_re({platform, Re, Opts}) -> {platform, compile_re1(Re, Opts), Opts};
-compile_re({Re, Opts}) -> {any, compile_re1(Re, Opts), Opts};
-compile_re(Re) -> compile_re({Re, []}).
+compile_re({name, Re})           -> compile_re1({name, Re, []});
+compile_re({name, _, _} = R)     -> compile_re1(R);
+compile_re({link, Re})           -> compile_re1({link, Re, []});
+compile_re({link, _, _} = R)     -> compile_re1(R);
+compile_re({platform, Re})       -> compile_re1({platform, Re, []});
+compile_re({platform, _, _} = R) -> compile_re1(R);
+compile_re({Re, Opts})           -> compile_re1({any, Re, Opts});
+compile_re(Re)                   -> compile_re({Re, []}).
 
-compile_re1(Re, Opts) ->
+compile_re1({Atom, Re, Opts}) ->
     {ok, MP} = re:compile(Re, Opts),
-    MP.
+    {Atom, MP, lists:filter(fun filter_opts/1, Opts)}.
+
+filter_opts(anchored)                   -> true;
+filter_opts(global)                     -> true;
+filter_opts(notbol)                     -> true;
+filter_opts(noteol)                     -> true;
+filter_opts(report_errors)              -> true;
+filter_opts(notempty)                   -> true;
+filter_opts(notempty_atstart)           -> true;
+filter_opts({offset, _})                -> true;
+filter_opts({match_limit, _})           -> true;
+filter_opts({match_limit_recursion, _}) -> true;
+filter_opts({newline, _})               -> true;
+filter_opts({capture, _})               -> true;
+filter_opts({capture, _, _})            -> true;
+filter_opts(_)                          -> false.
 
 %%------------------------------------------------------------------------------
 

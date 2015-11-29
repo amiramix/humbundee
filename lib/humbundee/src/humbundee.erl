@@ -24,9 +24,10 @@
 
 -module(humbundee).
 
--export([download/1]).
+-export([download/1, status/1]).
 
-download(Id) when is_binary(Id) ->
-    hbd_api:download(Id);
-download(Other) ->
-    download(yolf:to_binary(Other)).
+download(Id) when is_binary(Id) -> hbd_api:download(Id);
+download(Other) -> download(yolf:to_binary(Other)).
+
+status(Id) when is_binary(Id) -> hbd_api:status(Id);
+status(Other) -> status(yolf:to_binary(Other)).

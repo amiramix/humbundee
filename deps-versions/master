@@ -1,5 +1,3 @@
-lib_clone_deps = \
-	'-b develop $(repo_base_url)/yolf.git'
-
-lib_rm_deps = \
-	yolf
+%% -*- erlang -*-
+{"develop", "=REPOBASE=/yolf.git", "yolf"}.
+{"master",  "https://github.com/amiramix/etorrent_core.git", "etorrent_core"}.

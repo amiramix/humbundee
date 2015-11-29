@@ -26,8 +26,11 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/1,
-         download/1]).
+-export([
+         start_link/1,
+         download/1,
+         status/1
+        ]).
 
 %% gen_server callbacks
 -export([
@@ -48,10 +51,13 @@ start_link(Cfg) ->
     ?LOG_WORKER(?MODULE),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Cfg], []).
 
-download(Id) when is_binary(Id) ->
-    gen_server:cast(?MODULE, {download, Id});
-download(_) ->
-    yio:en(<<"Please specify Id as binary">>).
+download(Id) when is_binary(Id) -> gen_server:cast(?MODULE, {download, Id});
+download(_) -> bad_id().
+
+status(Id) when is_binary(Id) -> gen_server:cast(?MODULE, {status, Id});
+status(_) -> bad_id().
+
+bad_id() -> yio:en(<<"Please specify Id as binary">>).
 
 %%% gen_server callbacks
 init([Cfg]) ->
@@ -65,6 +71,9 @@ handle_call(_, {Pid, _Tag}, State) ->
 
 handle_cast({download, Id}, State) ->
     {noreply, download_id(Id, State)};
+handle_cast({status, Id}, State) ->
+    status_id(Id, State),
+    {noreply, State};
 handle_cast(_, State) ->
     {noreply, State}.
 
@@ -100,6 +109,16 @@ start_download(Id, #st{cfg = Cfg, ids = Ids, pids = Pids} = State) ->
         {error, _} = Err ->
             yio:en(<<"Can't start the download, error: ">>, Err, endl),
             State
+    end.
+
+%%------------------------------------------------------------------------------
+
+status_id(Id, #st{ids = Ids}) ->
+    case maps:find(Id, Ids) of
+        {ok, Pid} ->
+            hbd_id:print_status(Pid);
+        error ->
+            yio:en(<<"Id '">>, Id, <<"' isn't being downloaded. Ignoring...">>)
     end.
 
 stop_download(Pid, Reason, #st{pids = Pids} = State) ->
