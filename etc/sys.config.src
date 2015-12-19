@@ -31,6 +31,7 @@
    {order_url, <<"https://www.humblebundle.com/api/v1/order/">>},
    {cookie, <<"../=NODE=/humblebundle.cookie">>},
    {download_dir, <<"../=NODE=/downloads">>},
+   {temp_dir, <<"../=NODE=/temp">>},
    {destination_dir, <<"../=NODE=/humblebundle">>},
    {exclude_regex_list,
     [

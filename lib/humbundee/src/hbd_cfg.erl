@@ -59,11 +59,13 @@ read_config() ->
     {ok, Url} = application:get_env(humbundee, order_url),
     {ok, Coo} = application:get_env(humbundee, cookie),
     {ok, Dir} = application:get_env(humbundee, download_dir),
+    {ok, Tmp} = application:get_env(humbundee, temp_dir),
     {ok, Des} = application:get_env(humbundee, destination_dir),
     Wrk = application:get_env(humbundee, workers, 20),
     Cfg = #{url     => yolf:to_binary(Url),
             cookie  => yolf:to_binary(Coo),
             in      => yolf:to_binary(Dir),
+            tmp     => yolf:to_binary(Tmp),
             out     => yolf:to_binary(Des),
             regex   => application:get_env(humbundee, exclude_regex_list, []),
             workers => yolf:to_integer(Wrk)},
@@ -96,9 +98,10 @@ merge_configs(Cfg0, UserCfg) ->
     Cfg1 = add_cfg(url,     Cfg0, order_url,          UserCfg, to_binary),
     Cfg2 = add_cfg(cookie,  Cfg1, cookie,             UserCfg, to_binary),
     Cfg3 = add_cfg(in,      Cfg2, download_dir,       UserCfg, to_binary),
-    Cfg4 = add_cfg(out,     Cfg3, destination_dir,    UserCfg, to_binary),
-    Cfg5 = add_cfg(regex,   Cfg4, exclude_regex_list, UserCfg, undefined),
-    _Dum = add_cfg(workers, Cfg5, workers,            UserCfg, to_integer).
+    Cfg4 = add_cfg(tmp,     Cfg3, temp_dir,           UserCfg, to_binary),
+    Cfg5 = add_cfg(out,     Cfg4, destination_dir,    UserCfg, to_binary),
+    Cfg6 = add_cfg(regex,   Cfg5, exclude_regex_list, UserCfg, undefined),
+    _Dum = add_cfg(workers, Cfg6, workers,            UserCfg, to_integer).
 
 add_cfg(MapKey, Map, CfgKey, Cfg, ConvFun) ->
     case proplists:get_value(CfgKey, Cfg) of
@@ -144,7 +147,7 @@ filter_opts(_)                          -> false.
 
 %%------------------------------------------------------------------------------
 
-validate_cfg(#{cookie := Cookie, in := In, out := Out}) ->
+validate_cfg(#{cookie := Cookie, in := In, tmp := Tmp, out := Out}) ->
     case filelib:is_regular(Cookie) of
         true -> ok;
         false -> no_cookie(Cookie)
@@ -153,9 +156,13 @@ validate_cfg(#{cookie := Cookie, in := In, out := Out}) ->
         ok -> ok;
         {error, _} = Err1 -> no_download_dir(In, Err1)
     end,
+    case ycmd:ensure_dir(Tmp) of
+        ok -> ok;
+        {error, _} = Err2 -> no_temp_dir(In, Err2)
+    end,
     case ycmd:ensure_dir(Out) of
         ok -> ok;
-        {error, _} = Err2 -> no_destination_dir(In, Err2)
+        {error, _} = Err3 -> no_destination_dir(In, Err3)
     end.
 
 no_cookie(Cookie) ->
@@ -166,6 +173,11 @@ no_download_dir(Dir, Err) ->
     yio:en(<<"Download directory '">>, Dir, <<", doesn't exist and couldn't ">>,
            <<" be created, error: ">>, Err, <<". Exiting.">>),
     throw(bad_in_dir).
+
+no_temp_dir(Dir, Err) ->
+    yio:en(<<"Temporary directory '">>, Dir, <<", doesn't exist and couldn't ">>,
+           <<" be created, error: ">>, Err, <<". Exiting.">>),
+    throw(bad_tmp_dir).
 
 no_destination_dir(Dir, Err) ->
     yio:en(<<"Destination directory '">>, Dir, <<", doesn't exist and couldn't ">>,

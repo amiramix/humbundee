@@ -1,0 +1,10 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -smp enable -hidden
+
+-include("builderl/include/load_builderl.hrl").
+
+main(Args) ->
+    load_builderl(),
+    Foo = list_to_atom(filename:basename(escript:script_name(), ".esh")),
+    bld_load:Foo(Args).

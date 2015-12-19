@@ -28,7 +28,7 @@
 %% API
 -export([
          start_link/1,
-         do_torrent/3
+         do_torrent/2
         ]).
 
 %% gen_server callbacks
@@ -45,23 +45,27 @@
 -include("download.hrl").
 
 -define(INTERVAL, 1000).
--record(st, {max, ids, q}).
+-record(st, {max, in, tmp, ids, q}).
 
 %%% API
-start_link(Workers) ->
+start_link(Cfg) ->
     ?LOG_WORKER(?MODULE),
-    gen_server:start_link({local, ?MODULE}, ?MODULE, [Workers], []).
+    gen_server:start_link({local, ?MODULE}, ?MODULE, [Cfg], []).
 
-do_torrent(TrFile, InDir, DRec) ->
-    gen_server:call(?MODULE, {do, TrFile, InDir, DRec}, infinity).
+do_torrent(TrFile, DRec) ->
+    gen_server:call(?MODULE, {do, TrFile, DRec}, infinity).
 
 %%% gen_server callbacks
-init([Workers]) ->
+init([#{workers := Workers, in := In, tmp := Tmp}]) ->
     ?LOG_WORKER_INIT(?MODULE),
     erlang:send_after(?INTERVAL, self(), trigger),
-    {ok, #st{max = Workers, ids = #{}, q = queue:new()}}.
+    {ok, #st{max = Workers,
+             in  = In,
+             tmp = Tmp,
+             ids = #{},
+             q   = queue:new()}}.
 
-handle_call({do, TrFile, _InDir, DRec}, From, #st{q = Q} = St) ->
+handle_call({do, TrFile, DRec}, From, #st{q = Q} = St) ->
     Download = DRec#d{from = From},
     NewQ = queue:in(Download, Q),
     hbd_id:torrent_added(DRec#d.logpid, TrFile, DRec#d.file),
@@ -74,6 +78,7 @@ handle_cast(_, State) ->
 
 handle_info(trigger, #st{q = Q} = St) ->
     erlang:send_after(?INTERVAL, self(), trigger),
+%%TODO
     {noreply, St#st{q = next_d(queue:out(Q))}};
 handle_info(_, State) ->
     {noreply, State}.
@@ -85,6 +90,9 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 %%% Internal methods
+
+%% next_d(Q, Max) ->
+%%     filelib:wildcard("*", "/home/g/_data/downloads/")
 
 next_d({empty, Q}) ->
     Q;

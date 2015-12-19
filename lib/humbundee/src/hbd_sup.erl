@@ -40,11 +40,11 @@ start_link(Cfg) ->
     ?LOG_SUPERVISOR(?SERVER),
     supervisor:start_link({local, ?SERVER}, ?MODULE, [Cfg]).
 
-init([Cfg = #{workers := Workers}]) ->
+init([Cfg]) ->
     ?LOG_SUPERVISOR_INIT(?SERVER),
 
     EventMngr = ?WORKER(hbd_event),
-    PoolMngr = ?WORKER2(hbd_pool, Workers),
+    PoolMngr = ?WORKER2(hbd_pool, Cfg),
     ApiMngr  = ?WORKER2(hbd_api, Cfg),
 
     Children = [EventMngr, PoolMngr, ApiMngr],

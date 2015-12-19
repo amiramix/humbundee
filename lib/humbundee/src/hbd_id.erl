@@ -46,7 +46,7 @@
 -include_lib("yolf/include/yolf.hrl").
 -include("download.hrl").
 
--record(st, {id, url, cookie, regex, in, out, pids, count, ends}).
+-record(st, {id, url, cookie, regex, out, pids, count, ends}).
 
 %%% API
 start_link(Cfg, Id) ->
@@ -71,7 +71,6 @@ init([Cfg, Id]) ->
                  url    = maps:get(url, Cfg),
                  cookie = maps:get(cookie, Cfg),
                  regex  = maps:get(regex, Cfg),
-                 in     = maps:get(in, Cfg),
                  out    = init_out_dir(maps:get(out, Cfg), Id),
                  pids   = sets:new(),
                  ends   = {0, 0, 0}}}
@@ -261,11 +260,11 @@ id_finished(St, Count, {OK, Err, Exc}) ->
 
 %%------------------------------------------------------------------------------
 
-do_print_status(#st{id = Id, url = Url, cookie = Cookie, in = In,
-                    out = Out, pids = Pids, ends = Ends}) ->
+do_print_status(#st{id = Id, url = Url, cookie = Cookie, out = Out, pids = Pids,
+                    count = Count, ends = Ends}) ->
     yio:en([<<"Id:     ">>, Id,     endl, <<"Url:    ">>, Url,  endl,
-            <<"Cookie: ">>, Cookie, endl, <<"In:     ">>, In,   endl,
-            <<"Out:    ">>, Out,    endl, <<"Ends:   ">>, Ends, endl,
+            <<"Cookie: ">>, Cookie, endl, <<"Out:    ">>, Out,  endl,
+            <<"Count: ">>,  Count,  endl, <<"Ends:   ">>, Ends, endl,
             <<"Pids:   ">>, sets:to_list(Pids)]).
 
 start(#st{id = Id, url = Url, cookie = Cookie, out = OutDir} = St) ->
@@ -317,7 +316,7 @@ start_one(LogPid, Parent, TrDir, Path, Item, St) ->
               path    = Path,
               sum     = get_sum(Item),
               size    = maps:get(size, Item)},
-    start_torrent(LogPid, TrCmd, St#st.in, DRec).
+    start_torrent(LogPid, TrCmd, DRec).
 
 exit_if_excluded(LogPid, Path, List, Item) ->
     Vals = [X || X <- maps:values(Item), is_binary(X) orelse yolf:is_string(X)],
@@ -367,27 +366,27 @@ torrent_cmd(TrDir, Torrent, Cookie) ->
 get_sum(#{sha1 := undefined, md5 := Md5}) -> {md5, Md5};
 get_sum(#{sha1 := Sha1}) when Sha1 =/= undefined -> {sha1, Sha1}.
 
-start_torrent(LogPid, {Cmd, TrFile}, InDir, DRec) ->
+start_torrent(LogPid, {Cmd, TrFile}, DRec) ->
     case yexec:sh_cmd(Cmd) of
         {0, _} ->
             torrent_finished(LogPid, self(), Cmd, ok),
-            check_torrent(LogPid, TrFile, InDir, DRec);
+            check_torrent(LogPid, TrFile, DRec);
         Err ->
             torrent_finished(LogPid, self(), Cmd, Err),
             exit(no_torrent)
     end.
 
-check_torrent(LogPid, TrFile, InDir, DRec) ->
+check_torrent(LogPid, TrFile, DRec) ->
     case filelib:is_regular(TrFile) andalso
         etorrent_bcoding:parse_file(TrFile) of
-        {ok, BCode} -> process_torrent(LogPid, TrFile, InDir, DRec, BCode);
+        {ok, BCode} -> process_torrent(LogPid, TrFile, DRec, BCode);
         false -> bad_torrent(LogPid, self(), TrFile, enoent);
         {error, Err} -> bad_torrent(LogPid, self(), TrFile, Err)
     end.
 
-process_torrent(LogPid, TrFile, InDir, DRec, BCode) ->
+process_torrent(LogPid, TrFile, DRec, BCode) ->
     %% Support for torrents with multiple files probably not needed
     [{Name, Size}] = etorrent_io:file_sizes(BCode),
     Size = DRec#d.size,
-    hbd_pool:do_torrent(TrFile, InDir, DRec#d{file = Name}),
+    hbd_pool:do_torrent(TrFile, DRec#d{file = Name}),
     download_finished(LogPid, self(), filename:join(DRec#d.path, Name)).
