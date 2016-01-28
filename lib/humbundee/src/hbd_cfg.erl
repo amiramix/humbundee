@@ -66,7 +66,7 @@ read_config() ->
             cookie  => yolf:to_binary(Coo),
             in      => yolf:to_binary(Dir),
             tmp     => yolf:to_binary(Tmp),
-            out     => yolf:to_binary(Des),
+            dest    => yolf:to_binary(Des),
             regex   => application:get_env(humbundee, exclude_regex_list, []),
             workers => yolf:to_integer(Wrk)},
     yio:in(<<"Read config:">>, endl, Cfg, endl),
@@ -99,7 +99,7 @@ merge_configs(Cfg0, UserCfg) ->
     Cfg2 = add_cfg(cookie,  Cfg1, cookie,             UserCfg, to_binary),
     Cfg3 = add_cfg(in,      Cfg2, download_dir,       UserCfg, to_binary),
     Cfg4 = add_cfg(tmp,     Cfg3, temp_dir,           UserCfg, to_binary),
-    Cfg5 = add_cfg(out,     Cfg4, destination_dir,    UserCfg, to_binary),
+    Cfg5 = add_cfg(dest,    Cfg4, destination_dir,    UserCfg, to_binary),
     Cfg6 = add_cfg(regex,   Cfg5, exclude_regex_list, UserCfg, undefined),
     _Dum = add_cfg(workers, Cfg6, workers,            UserCfg, to_integer).
 
@@ -110,12 +110,11 @@ add_cfg(MapKey, Map, CfgKey, Cfg, ConvFun) ->
     end.
 
 convert(undefined, Value) -> Value;
-convert(ConvFun, Value) -> yolf:ConvFun(Value).
+convert(ConvFun, Value)   -> yolf:ConvFun(Value).
 
 %%------------------------------------------------------------------------------
 
-process_regex(RegexList) ->
-    [compile_re(X) || X <- RegexList].
+process_regex(RegexList) -> [compile_re(X) || X <- RegexList].
 
 compile_re({name, Re})           -> compile_re1({name, Re, []});
 compile_re({name, _, _} = R)     -> compile_re1(R);
@@ -147,42 +146,41 @@ filter_opts(_)                          -> false.
 
 %%------------------------------------------------------------------------------
 
-validate_cfg(#{cookie := Cookie, in := In, tmp := Tmp, out := Out}) ->
+validate_cfg(#{cookie := Cookie, in := In, tmp := Tmp, dest := Dest}) ->
     case filelib:is_regular(Cookie) of
         true -> ok;
         false -> no_cookie(Cookie)
     end,
-    case ycmd:ensure_dir(In) of
-        ok -> ok;
-        {error, _} = Err1 -> no_download_dir(In, Err1)
-    end,
-    case ycmd:ensure_dir(Tmp) of
-        ok -> ok;
-        {error, _} = Err2 -> no_temp_dir(In, Err2)
-    end,
-    case ycmd:ensure_dir(Out) of
-        ok -> ok;
-        {error, _} = Err3 -> no_destination_dir(In, Err3)
-    end.
+    ensure_dir(In, <<"Download">>, bad_download_dir),
+    ensure_dir(Tmp, <<"Temp">>, bad_temp_dir),
+    ensure_dir(Dest, <<"Destination">>, bad_destination_dir),
+    check_empty(In, <<"Download">>, download_dir_not_empty),
+    check_empty(Tmp, <<"Temp">>, temp_dir_not_empty).
 
 no_cookie(Cookie) ->
     yio:en(<<"Cookie file '">>, Cookie, <<"' doesn't exist, exiting.">>),
     throw(no_cookie).
 
-no_download_dir(Dir, Err) ->
-    yio:en(<<"Download directory '">>, Dir, <<", doesn't exist and couldn't ">>,
-           <<" be created, error: ">>, Err, <<". Exiting.">>),
-    throw(bad_in_dir).
+ensure_dir(Dir, Name, Type) ->
+    case ycmd:ensure_dir(Dir) of
+        ok -> ok;
+        {error, _} = Err -> no_dir(Name, Type, Dir, Err)
+    end.
 
-no_temp_dir(Dir, Err) ->
-    yio:en(<<"Temporary directory '">>, Dir, <<", doesn't exist and couldn't ">>,
+no_dir(Name, Type, Dir, Err) ->
+    yio:en(Name, <<" directory '">>, Dir, <<", doesn't exist and couldn't ">>,
            <<" be created, error: ">>, Err, <<". Exiting.">>),
-    throw(bad_tmp_dir).
+    throw(Type).
 
-no_destination_dir(Dir, Err) ->
-    yio:en(<<"Destination directory '">>, Dir, <<", doesn't exist and couldn't ">>,
-           <<" be created, error: ">>, Err, <<". Exiting.">>),
-    throw(bad_out_dir).
+check_empty(Dir, Name, Type) ->
+    case ycmd:ls_dir(Dir) of
+        [] -> ok;
+        _ -> not_empty(Name, Type, Dir)
+    end.
+
+not_empty(Name, Type, Dir) ->
+    yio:en(Name, <<" directory '">>, Dir, <<", is not empty. Exiting.">>),
+    throw(Type).
 
 %%------------------------------------------------------------------------------
 

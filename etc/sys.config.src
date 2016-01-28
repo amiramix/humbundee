@@ -33,11 +33,6 @@
    {download_dir, <<"../=NODE=/downloads">>},
    {temp_dir, <<"../=NODE=/temp">>},
    {destination_dir, <<"../=NODE=/humblebundle">>},
-   {exclude_regex_list,
-    [
-     {name, <<"^MOBI$">>, [caseless]},
-     {platform, <<"^mac$">>}
-    ]},
    {workers, 20}
   ]}
 ].

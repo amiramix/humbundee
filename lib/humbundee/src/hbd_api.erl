@@ -29,6 +29,7 @@
 -export([
          start_link/1,
          download/1,
+         status/0,
          status/1
         ]).
 
@@ -51,13 +52,12 @@ start_link(Cfg) ->
     ?LOG_WORKER(?MODULE),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Cfg], []).
 
-download(Id) when is_binary(Id) -> gen_server:cast(?MODULE, {download, Id});
-download(_) -> bad_id().
+download(Id) when is_binary(Id) ->
+    gen_server:cast(?MODULE, {download, Id}).
 
-status(Id) when is_binary(Id) -> gen_server:cast(?MODULE, {status, Id});
-status(_) -> bad_id().
+status() -> hbd_pool:status().
 
-bad_id() -> yio:en(<<"Please specify Id as binary">>).
+status(Id) when is_binary(Id) -> gen_server:call(?MODULE, {status, Id}).
 
 %%% gen_server callbacks
 init([Cfg]) ->
@@ -65,6 +65,8 @@ init([Cfg]) ->
     process_flag(trap_exit, true),
     {ok, #st{cfg = Cfg, ids = #{}, pids = #{}}}.
 
+handle_call({status, Id}, _From, State) ->
+    {reply, status_id(Id, State), State};
 handle_call(_, {Pid, _Tag}, State) ->
     exit(Pid, badarg),
     {noreply, State}.
@@ -72,7 +74,7 @@ handle_call(_, {Pid, _Tag}, State) ->
 handle_cast({download, Id}, State) ->
     {noreply, download_id(Id, State)};
 handle_cast({status, Id}, State) ->
-    status_id(Id, State),
+    print_status_id(Id, State),
     {noreply, State};
 handle_cast(_, State) ->
     {noreply, State}.
@@ -114,6 +116,12 @@ start_download(Id, #st{cfg = Cfg, ids = Ids, pids = Pids} = State) ->
 %%------------------------------------------------------------------------------
 
 status_id(Id, #st{ids = Ids}) ->
+    case maps:find(Id, Ids) of
+        {ok, Pid} -> hbd_id:status(Pid);
+        error -> {error, already_started}
+    end.
+
+print_status_id(Id, #st{ids = Ids}) ->
     case maps:find(Id, Ids) of
         {ok, Pid} ->
             hbd_id:print_status(Pid);
