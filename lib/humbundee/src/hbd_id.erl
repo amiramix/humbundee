@@ -29,10 +29,11 @@
 -export([
          start_link/2,
          start_download/1,
-         torrent_added/3,
+         download_added/3,
          file_started/2,
+         warn_bad_sha1/2,
          stale_detected/2,
-         stale_completed/2,
+         download_completed/2,
          stale_error/4,
          status/1
         ]).
@@ -47,6 +48,9 @@
          code_change/3
         ]).
 
+-define(DATA_DIR, <<"_data">>).
+-define(TORRENTS_DIR, <<"_torrents">>).
+
 -include_lib("yolf/include/yolf.hrl").
 -include("download.hrl").
 
@@ -60,17 +64,20 @@ start_link(Cfg, Id) ->
 start_download(Pid) ->
     gen_server:cast(Pid, start).
 
-torrent_added(Pid, File, TrFile) ->
+download_added(Pid, File, TrFile) ->
     gen_server:cast(Pid, {added, File, TrFile}).
 
 file_started(Pid, File) ->
     gen_server:cast(Pid, {fetching, File}).
 
+warn_bad_sha1(Pid, File) ->
+    gen_server:cast(Pid, {bad_sha1, File}).
+
 stale_detected(Pid, File) ->
     gen_server:cast(Pid, {stale, File}).
 
-stale_completed(Pid, File) ->
-    gen_server:cast(Pid, {stale_done, File}).
+download_completed(Pid, File) ->
+    gen_server:cast(Pid, {downloaded, File}).
 
 stale_error(Pid, File, Err, DelRes) ->
     gen_server:cast(Pid, {stale_err, File, Err, DelRes}).
@@ -91,7 +98,7 @@ init([Cfg, Id]) ->
                  regex  = maps:get(regex, Cfg),
                  out    = init_out_dir(maps:get(dest, Cfg), Id),
                  pids   = sets:new(),
-                 ends   = {0, 0, 0}}}
+                 ends   = {0, 0, 0, 0}}}
     catch
         throw:Term -> {stop, Term}
     end.
@@ -114,6 +121,9 @@ handle_cast({add, Pid}, #st{pids = Set} = St) ->
     {noreply, St#st{pids = sets:add_element(Pid, Set)}};
 handle_cast({remove, Pid}, State) ->
     check_done(ok, Pid, State);
+handle_cast({ignored, Pid, Type, Args}, State) ->
+    log_ignored(Type, Pid, Args),
+    check_done(ignored, Pid, State);
 handle_cast({excluded, Pid, Path, Match, Subject}, State) ->
     log_excluded(Pid, Path, Match, Subject),
     check_done(excluded, Pid, State);
@@ -126,17 +136,20 @@ handle_cast({added, File, TrFile}, State) ->
 handle_cast({fetching, File}, State) ->
     log_fetching_file(File),
     {noreply, State};
+handle_cast({bad_sha1, File}, State) ->
+    log_bad_sha1(File),
+    {noreply, State};
 handle_cast({stale, File}, State) ->
     log_stale_file(File),
     {noreply, State};
-handle_cast({stale_done, File}, State) ->
-    log_stale_done_file(File),
+handle_cast({downloaded, File}, State) ->
+    log_downloaded(File),
     {noreply, State};
 handle_cast({stale_err, File, Err, DelRes}, State) ->
     log_error(stale_err, {File, Err, DelRes}),
     {noreply, State};
 handle_cast({done, Pid, Name}, State) ->
-    log_downloaded(Pid, Name),
+    log_done(Pid, Name),
     check_done(done, Pid, State);
 handle_cast({error, Pid, Type, Args}, State) ->
     log_error(Type, Pid, Args),
@@ -172,8 +185,11 @@ record_process(LPid, Pid) ->
 finish_process(LPid, Pid) ->
     gen_server:cast(LPid, {remove, Pid}).
 
-found_excluded(LPid, Pid, Path, Match, Subject) ->
-    gen_server:cast(LPid, {excluded, Pid, Path, Match, Subject}).
+found_ignored(LPid, Type, Args) ->
+    gen_server:cast(LPid, {ignored, self(), Type, Args}).
+
+found_excluded(LPid, Path, Match, Subject) ->
+    gen_server:cast(LPid, {excluded, self(), Path, Match, Subject}).
 
 torrent_finished(LPid, Pid, Cmd, Result) ->
     gen_server:cast(LPid, {torrent, Pid, Cmd, Result}).
@@ -191,43 +207,52 @@ log_process(Pid, Line, Items) ->
               <<" download(s) in line ">>, Line, <<".">>]).
 
 log_download(Pid, Line) ->
-    yolog:tin(<<"Started pid: ">>, Pid, <<" to download: ">>, endl,
-              <<"[NEW_DOWN] ">>, Line).
+    yolog:in(<<"Started pid: ">>, Pid, <<" to download: ">>, endl,
+             <<"  [NEW_DOWN] ">>, Line).
+
+log_ignored(asmjs, Pid, Path) ->
+    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is an embedded">>,
+               <<"'asmjs' application and can't be downloaded: ">>, endl,
+               <<"  [IGNASMJS] ">>, Path]).
 
 log_excluded(Pid, Path, Match, Subject) ->
     yolog:tin([<<"Process ">>, Pid, <<" finished, excluded pattern '">>, Match,
                <<"' found in subject '">>, Subject, <<"', download:">>, endl,
-               <<"[EXCLDOWN] ">>, Path]).
+               <<"  [EXCLDOWN] ">>, Path]).
 
 log_torrent(Pid, Cmd, ok) ->
     yolog:tin(<<"Success, process ">>, Pid,
               <<" downloaded torrent with command: ">>, endl,
-              <<"[TOR_DONE] ">>, Cmd);
+              <<"  [TOR_DONE] ">>, Cmd);
 log_torrent(Pid, Cmd, Result) ->
     yolog:tin([<<"Error: ">>, Result, <<", process ">>, Pid,
                <<" couldn't download torrent with command: ">>, endl,
-               <<"[ERR:TOR_DOWN] ">>, Cmd]).
+               <<"  [ERR:TOR_DOWN] ">>, Cmd]).
 
 log_torrent_added(Name, TrFile) ->
     yolog:tin([<<"Added to the download queue file/torrent:">>, endl,
-               <<"[QADDFILE] ">>, Name, endl,
-               <<"[QADD_TOR] ">>, TrFile]).
+               <<"  [QADDFILE] ">>, Name, endl,
+               <<"  [QADD_TOR] ">>, TrFile]).
 
 log_fetching_file(File) ->
     yolog:tin([<<"Started downloading file:">>, endl,
-               <<"[FILEDOWN] ">>, File]).
+               <<"  [FILEDOWN] ">>, File]).
+
+log_bad_sha1(File) ->
+    yolog:tin([<<"Warning, incorrect SHA1 sum for file:">>, endl,
+               <<"  [WARNSHA1] ">>, File]).
 
 log_stale_file(File) ->
     yolog:tin([<<"Detected stale file, will try to download with 'wget':">>,
-               endl, <<"[STALEFIL] ">>, File]).
+               endl, <<"  [STALEFIL] ">>, File]).
 
-log_stale_done_file(File) ->
-    yolog:tin([<<"Stale file downloaded successfully:">>, endl,
-               <<"[STFIDONE] ">>, File]).
+log_downloaded(File) ->
+    yolog:tin([<<"Finished downloading file with 'wget':">>, endl,
+               <<"  [WGETDONE] ">>, File]).
 
-log_downloaded(Pid, Name) ->
+log_done(Pid, Name) ->
     yolog:tin(<<"Process ">>, Pid, <<" finished downloading: ">>, endl,
-              <<"[FILEDONE] ">>, Name).
+              <<"  [FILEDONE] ">>, Name).
 
 
 log_error(Type, Pid, Args) ->
@@ -235,45 +260,48 @@ log_error(Type, Pid, Args) ->
               ++ log_error(Type, Args)).
 
 log_error(mkdir, {Path, Err}) ->
-    [<<"Couldn't create the destination folder/torrent:">>, endl,
-     <<"[ERR:BAD_PATH] ">>, Path, endl, <<"reason: ">>, Err];
+    [<<"  Couldn't create the destination folder/torrent:">>, endl,
+     <<"  [ERR:BAD_PATH] ">>, Path, endl, <<"reason: ">>, Err];
 log_error(bad_torrent, {Name, Err}) ->
-    [<<"[ERR:BAD__TOR] ">>, Name, endl, <<"reason: ">>, Err];
-log_error(duplicate, {Name, TrFile}) ->
-    [<<"Duplicate file name, can't download file/torrent:">>, endl,
-     <<"[ERR:DUPLFILE] ">>, Name, endl,
-     <<"[ERR:DUPL_TOR] ">>, TrFile];
-log_error(torrent_cmd, {Name, TrFile, Err}) ->
-    [<<"Couldn't start bittorrent download:">>, endl,
-     <<"[ERR:BADCMDFI] ">>, Name, endl,
-     <<"[ERR:BADCMDTR] ">>, TrFile, endl, <<"reason: ">>, Err];
-log_error(bad_size, {Name, TrFile}) ->
-    [<<"Incorrect size of the downloaded file/torrent:">>, endl,
-     <<"[ERR:BADSIZEF] ">>, Name, endl,
-     <<"[ERR:BADSIZET] ">>, TrFile];
-log_error(bad_sum, {Name, TrFile, Type}) ->
-    [<<"Incorrect ">>, Type, <<" sum of the downloaded file/torrent:">>, endl,
-     <<"[ERR:BADSUMFI] ">>, Name, endl,
-     <<"[ERR:BADSUMTR] ">>, TrFile];
-log_error(sum_error, {Name, TrFile, Type, Err}) ->
-    [<<"Couldn't verify ">>, Type,
+    [<<"  [ERR:BAD__TOR] ">>, Name, endl, <<"reason: ">>, Err];
+log_error(duplicate, {Name, Path, OtherRec}) ->
+    [<<"  Duplicate file name, already downloading file/torrent:">>, endl,
+     <<"  [ERR:DUPLFILE] ">>, Name, endl,
+     <<"  [ERR:DUPLPATH] ">>, Path, endl,
+     <<"  the other file already being downloaded:">>, endl,
+     <<"  [ERR:DUPLOTHR] ">>, OtherRec];
+log_error(torrent_cmd, {Name, Path, Err}) ->
+    [<<"  Couldn't start bittorrent download:">>, endl,
+     <<"  [ERR:BADCMDFI] ">>, Name, endl,
+     <<"  [ERR:BADCMDPA] ">>, Path, endl, <<"reason: ">>, Err];
+log_error(bad_size, {Name, Path}) ->
+    [<<"  Incorrect size of the downloaded file/torrent:">>, endl,
+     <<"  [ERR:BADSIZEF] ">>, Name, endl,
+     <<"  [ERR:BADSIZEP] ">>, Path];
+log_error(bad_sum, {Name, Path}) ->
+    [<<"  Incorrect SHA1/MD5 sum of the downloaded file/torrent:">>, endl,
+     <<"  [ERR:BADSUMFI] ">>, Name, endl,
+     <<"  [ERR:BADSUMPA] ">>, Path];
+log_error(sum_error, {Name, Path, Type, Err}) ->
+    [<<"  Couldn't verify ">>, Type,
      <<" sum for the downloaded file/torrent:">>, endl,
-     <<"[ERR:SUMCMDFI] ">>, Name, endl,
-     <<"[ERR:SUMCMDTR] ">>, TrFile, endl, <<"reason: ">>, Err];
-log_error(rename, {Name, TrFile, Err}) ->
-    [<<"Couldn't move to the destination folder file/torrent:">>, endl,
-     <<"[ERR:MOVEFILE] ">>, Name, endl,
-     <<"[ERR:MOVE_TOR] ">>, TrFile, endl, <<"reason: ">>, Err];
+     <<"  [ERR:SUMCMDFI] ">>, Name, endl,
+     <<"  [ERR:SUMCMDPA] ">>, Path, endl, <<"reason: ">>, Err];
+log_error(rename, {Name, Path, Err}) ->
+    [<<"  Couldn't move to the destination folder file/torrent:">>, endl,
+     <<"  [ERR:MOVEFILE] ">>, Name, endl,
+     <<"  [ERR:MOVEPATH] ">>, Path, endl, <<"reason: ">>, Err];
 log_error(stale_err, {Name, Err, DelRes}) ->
-    [<<"Couldn't download file with 'wget':">>, endl,
-     <<"[ERR:WGETFILE] ">>, Name, endl, <<"reason: ">>, Err, endl,
-     <<"result of deleting the file: ">>, DelRes];
-log_error(error, {Name, TrFile, Err}) ->
-    [<<"[ERR:GEN_FILE] ">>, Name, endl,
-     <<"[ERR:GEN__TOR] ">>, TrFile, endl, <<"reason: ">>, Err].
+    [<<"  Couldn't download file with 'wget':">>, endl,
+     <<"  [ERR:WGETFILE] ">>, Name, endl, <<"reason: ">>, Err, endl,
+     <<"  result of deleting the file: ">>, DelRes];
+log_error(error, {Name, Path, Err}) ->
+    [<<"  [ERR:GEN_FILE] ">>, Name, endl,
+     <<"  [ERR:GEN_PATH] ">>, Path, endl, <<"reason: ">>, Err].
 
 log_exit(Pid, Reason) ->
-    yolog:tin(<<"Process ">>, Pid, <<" terminated with reason ">>, Reason).
+    yolog:tin(<<"[ERR:PROCEXIT] Process ">>, Pid,
+              <<" terminated with reason ">>, Reason).
 
 %%------------------------------------------------------------------------------
 %% Internal methods
@@ -325,17 +353,18 @@ check_done(Type, Pid, #st{pids = Set, count = Count, ends = Ends} = St) ->
         _ -> {noreply, NewSt}
     end.
 
-incr_ends(error,    {OK, Err, Exc}) -> {OK,     Err + 1, Exc};
-incr_ends(excluded, {OK, Err, Exc}) -> {OK,     Err,     Exc + 1};
-incr_ends(done,     {OK, Err, Exc}) -> {OK + 1, Err,     Exc};
-incr_ends(ok,       Ends)            -> Ends.
+incr_ends(done,     {OK, Ign, Exc, Err}) -> {OK + 1, Ign,     Exc,     Err};
+incr_ends(ignored,  {OK, Ign, Exc, Err}) -> {OK,     Ign + 1, Exc,     Err};
+incr_ends(excluded, {OK, Ign, Exc, Err}) -> {OK,     Ign,     Exc + 1, Err};
+incr_ends(error,    {OK, Ign, Exc, Err}) -> {OK,     Ign,     Exc,     Err + 1};
+incr_ends(ok,       Ends)                -> Ends.
 
-id_finished(St, Count, {OK, Err, Exc}) ->
-    Status = if Count - OK - Err - Exc =:= 0 -> ok; true -> error end,
+id_finished(St, Count, {OK, Ign, Exc, Err}) ->
+    Status = if Count - OK - Ign - Exc - Err =:= 0 -> ok; true -> error end,
     yolog:tin([<<"Finished all downloads, Expected: ">>, Count,
-               <<", Downloaded: ">>, OK, <<", Errors: ">>, Err,
-               <<", Excluded: ">>, Exc, <<", Status: ">>, Status,
-               <<", closing log.">>]),
+               <<", Downloaded: ">>, OK,  <<", Ignored: ">>, Ign,
+               <<", Excluded: ">>,   Exc, <<", Errors: ">>,  Err,
+               <<", Status: ">>, Status, <<", closing log.">>]),
     yolog:stop(),
     {stop, normal, St}.
 
@@ -349,8 +378,9 @@ do_status(#st{id = Id, url = Url, cookie = Cookie, out = Out, pids = Pids,
 %%------------------------------------------------------------------------------
 
 start(#st{id = Id, url = Url, cookie = Cookie, out = OutDir} = St) ->
+    yolog:tin(<<"Log started.">>),
     Data = hbd_json:process(Url, Id, Cookie, OutDir),
-    TorrentDir = filename:join(OutDir, <<"torrents">>),
+    TorrentDir = filename:join(OutDir, ?TORRENTS_DIR),
     ok = yocmd:mk_dir(TorrentDir),
     [spawn_line(TorrentDir, X, St) || X <- Data].
 
@@ -388,17 +418,23 @@ get_download_name(#{platform := Platform, name := Name, machname := MName}) ->
 
 start_one(LogPid, Parent, TrDir, Path, Item, St) ->
     proc_lib:init_ack(Parent, {ok, self()}),
+    start_one(LogPid, TrDir, Path, Item, St).
+
+start_one(LogPid, _, Path, #{url := undefined, platform := <<"asmjs">>}, _) ->
+    found_ignored(LogPid, asmjs, Path),
+    exit(normal);
+start_one(LogPid, TrDir, Path, Item, St) ->
     record_process(LogPid, self()),
     exit_if_excluded(LogPid, Path, St#st.regex, Item),
     Torrent = maps:get(torrent, Item),
     TrCmd = torrent_cmd(TrDir, Torrent, St#st.cookie),
     DRec = #d{logpid = LogPid,
-              out    = St#st.out,
+              out    = filename:join(St#st.out, ?DATA_DIR),
               path   = Path,
               url    = maps:get(url, Item),
-              sum    = get_sum(Item),
+              sum    = {maps:get(sha1, Item), maps:get(md5, Item)},
               size   = maps:get(size, Item)},
-    case ycmd:ensure_dir(filename:join(DRec#d.out, Path)) of
+    case ycmd:ensure_dir(filename:join(DRec#d.out, DRec#d.path)) of
         ok -> start_torrent(LogPid, TrCmd, DRec);
         {error, Err} -> process_error(LogPid, mkdir, {Path, Err})
     end,
@@ -437,20 +473,21 @@ check_excluded(LogPid, Path, Subject, Re, Opts) ->
 check_excluded(_LogPid, _Path, _Subject, nomatch) ->
     ok;
 check_excluded(LogPid, Path, Subject, {match, Captured}) ->
-    found_excluded(LogPid, self(), Path, Captured, Subject),
+    found_excluded(LogPid, Path, Captured, Subject),
     exit(normal).
 
+torrent_cmd(_TrDir, undefined, _Cookie) ->
+    undefined;
 torrent_cmd(TrDir, Torrent, Cookie) ->
-    {ok, {_, _, _, _, Path, _}} = http_uri:parse(binary_to_list(Torrent)),
-    File = lists:last(filename:split(Path)),
-    TorrentFile = filename:join(TrDir, File),
+    TorrentFile = filename:join(TrDir, url_to_file(Torrent)),
     Cmd = << <<"wget -q --load-cookies ">>/binary, Cookie/binary,
              <<" -O ">>/binary, TorrentFile/binary,
              <<" \"">>/binary, Torrent/binary, <<"\"">>/binary >>,
     {Cmd, TorrentFile}.
 
-get_sum(#{sha1 := undefined, md5 := Md5}) -> {md5, Md5};
-get_sum(#{sha1 := Sha1}) when Sha1 =/= undefined -> {sha1, Sha1}.
+url_to_file(Url) ->
+    {ok, {_, _, _, _, Path, _}} = http_uri:parse(binary_to_list(Url)),
+    list_to_binary(lists:last(filename:split(Path))).
 
 start_torrent(LogPid, {Cmd, TrFile}, DRec) ->
     case yexec:sh_cmd(Cmd) of
@@ -460,7 +497,10 @@ start_torrent(LogPid, {Cmd, TrFile}, DRec) ->
         Err ->
             torrent_finished(LogPid, self(), Cmd, Err),
             exit(no_torrent)
-    end.
+    end;
+start_torrent(LogPid, undefined, #d{url = Url} = DRec) ->
+    NewDRec = DRec#d{file = url_to_file(Url)},
+    process_download(LogPid, NewDRec).
 
 check_torrent(LogPid, TrFile, DRec) ->
     case filelib:is_regular(TrFile) andalso
@@ -478,21 +518,24 @@ process_torrent(LogPid, TrFile, DRec, BCode) ->
     [{Name, Size}] = etorrent_io:file_sizes(BCode),
     Size = DRec#d.size,
     NewDRec = DRec#d{torrent = TrFile, file = list_to_binary(Name)},
-    case hbd_pool:do_torrent(NewDRec) of
+    process_download(LogPid, NewDRec).
+
+process_download(LogPid, #d{path = Path, file = File} = DRec) ->
+    case hbd_pool:do_download(DRec) of
         ok ->
-            download_finished(LogPid, self(), filename:join(DRec#d.path, Name));
-        {error, duplicate} ->
-            process_error(LogPid, duplicate, {Name, TrFile});
+            download_finished(LogPid, self(), filename:join(DRec#d.path, File));
+        {error, {duplicate, OtherRec}} ->
+            process_error(LogPid, duplicate, {File, Path, OtherRec});
         {error, {file_failed, Err}} ->
-            process_error(LogPid, torrent_cmd, {Name, TrFile, Err});
+            process_error(LogPid, torrent_cmd, {File, Path, Err});
         {error, bad_size} ->
-            process_error(LogPid, bad_size, {Name, TrFile});
-        {error, {bad_sum, Type}} ->
-            process_error(LogPid, bad_sum, {Name, TrFile, Type});
+            process_error(LogPid, bad_size, {File, Path});
+        {error, bad_sum} ->
+            process_error(LogPid, bad_sum, {File, Path});
         {error, {sum_error, Type, Err}} ->
-            process_error(LogPid, sum_error, {Name, TrFile, Type, Err});
+            process_error(LogPid, sum_error, {File, Path, Type, Err});
         {error, {rename, Err}} ->
-            process_error(LogPid, rename, {Name, TrFile, Err});
+            process_error(LogPid, rename, {File, Path, Err});
         {error, Err} ->
-            process_error(LogPid, error, {Name, TrFile, Err})
+            process_error(LogPid, error, {File, Path, Err})
     end.

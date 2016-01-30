@@ -52,8 +52,7 @@ start_link(Cfg) ->
     ?LOG_WORKER(?MODULE),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Cfg], []).
 
-download(Id) when is_binary(Id) ->
-    gen_server:cast(?MODULE, {download, Id}).
+download(Id) when is_binary(Id) -> gen_server:cast(?MODULE, {download, Id}).
 
 status() -> hbd_pool:status().
 
@@ -73,9 +72,6 @@ handle_call(_, {Pid, _Tag}, State) ->
 
 handle_cast({download, Id}, State) ->
     {noreply, download_id(Id, State)};
-handle_cast({status, Id}, State) ->
-    print_status_id(Id, State),
-    {noreply, State};
 handle_cast(_, State) ->
     {noreply, State}.
 
@@ -118,15 +114,7 @@ start_download(Id, #st{cfg = Cfg, ids = Ids, pids = Pids} = State) ->
 status_id(Id, #st{ids = Ids}) ->
     case maps:find(Id, Ids) of
         {ok, Pid} -> hbd_id:status(Pid);
-        error -> {error, already_started}
-    end.
-
-print_status_id(Id, #st{ids = Ids}) ->
-    case maps:find(Id, Ids) of
-        {ok, Pid} ->
-            hbd_id:print_status(Pid);
-        error ->
-            yio:en(<<"Id '">>, Id, <<"' isn't being downloaded. Ignoring...">>)
+        error -> {error, not_found}
     end.
 
 stop_download(Pid, Reason, #st{pids = Pids} = State) ->

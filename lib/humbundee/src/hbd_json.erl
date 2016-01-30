@@ -29,9 +29,9 @@
 process(Url, Id, Cookie, OutDir) ->
     Json = get_json(Url, Id, Cookie, OutDir),
     {ok, Terms} = yajler:decode(Json),
-    store_terms(OutDir, Id, Terms),
+    store_terms(OutDir, Id, Terms, <<".etr">>),
     Clean = parse(Terms),
-    store_clean(OutDir, Id, Clean),
+    store_terms(OutDir, Id, Clean, <<"_clean.etr">>),
     Clean.
 
 get_json(Url, Id, Cookie, Dir) ->
@@ -51,13 +51,10 @@ get_json(Url, Id, Cookie, Dir) ->
     {ok, Binary} = file:read_file(FileName),
     Binary.
 
-store_terms(Dir, Id, Terms) ->
-    FileName = filename:join(Dir, <<Id/binary, <<".etr">>/binary>>),
-    ok = file:write_file(FileName, io_lib:format("~p.~n", [Terms])).
-
-store_clean(Dir, Id, Terms) ->
-    FileName = filename:join(Dir, <<Id/binary, <<"_clean.etr">>/binary>>),
-    ok = file:write_file(FileName, io_lib:format("~p.~n", [Terms])).
+store_terms(Dir, Id, Terms, Suffix) ->
+    FileName = filename:join(Dir, <<Id/binary, Suffix/binary>>),
+    ok = file:write_file(FileName,
+                         io_lib:format("%% -*- erlang -*-~n~p.~n", [Terms])).
 
 %%------------------------------------------------------------------------------
 
@@ -93,11 +90,17 @@ clean_structs([H|T], Acc) -> clean_structs(T, [clean_struct(H)|Acc]);
 clean_structs([], Acc) -> Acc.
 
 clean_struct(X) ->
+    case proplists:get_value(<<"url">>, X) of
+        undefined -> #{url => undefined};
+        Urls when is_list(Urls) -> clean_struct1(X, Urls)
+    end.
+
+clean_struct1(X, Urls) ->
+    {Url, Torrent} = clean_url(Urls),
     Sha1 = proplists:get_value(<<"sha1">>, X),
     Md5 = proplists:get_value(<<"md5">>, X),
     Size = proplists:get_value(<<"file_size">>, X),
     Name = proplists:get_value(<<"name">>, X),
-    {Url, Torrent} = clean_url(proplists:get_value(<<"url">>, X)),
     #{sha1 => Sha1, md5 => Md5, size => Size,
       name => Name, url => Url, torrent => Torrent}.
 
