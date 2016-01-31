@@ -90,20 +90,34 @@ clean_structs([H|T], Acc) -> clean_structs(T, [clean_struct(H)|Acc]);
 clean_structs([], Acc) -> Acc.
 
 clean_struct(X) ->
+    Name = proplists:get_value(<<"name">>, X),
     case proplists:get_value(<<"url">>, X) of
-        undefined -> #{url => undefined};
-        Urls when is_list(Urls) -> clean_struct1(X, Urls)
+        Urls when is_list(Urls) -> clean_struct1(X, Name, Urls);
+        undefined -> check_download(X, Name, #{url => undefined})
     end.
 
-clean_struct1(X, Urls) ->
+clean_struct1(X, Name, Urls) ->
     {Url, Torrent} = clean_url(Urls),
     Sha1 = proplists:get_value(<<"sha1">>, X),
     Md5 = proplists:get_value(<<"md5">>, X),
     Size = proplists:get_value(<<"file_size">>, X),
-    Name = proplists:get_value(<<"name">>, X),
     #{sha1 => Sha1, md5 => Md5, size => Size,
       name => Name, url => Url, torrent => Torrent}.
 
 clean_url(X) ->
     {proplists:get_value(<<"web">>, X),
      proplists:get_value(<<"bittorrent">>, X)}.
+
+check_download(X, Name = <<"Stream">>, Struct) ->
+    add_stream(get_stream_url(X), Struct#{name => Name});
+check_download(_X, undefined, Struct) ->
+    Struct.
+
+add_stream(undefined, Struct) -> Struct;
+add_stream(Url, Struct) -> Struct#{stream => Url}.
+
+get_stream_url(X) ->
+    case proplists:get_value(<<"hd_stream_url">>, X) of
+        undefined -> proplists:get_value(<<"sd_stream_url">>, X);
+        Url -> Url
+    end.

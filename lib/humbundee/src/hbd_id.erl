@@ -211,9 +211,13 @@ log_download(Pid, Line) ->
              <<"  [NEW_DOWN] ">>, Line).
 
 log_ignored(asmjs, Pid, Path) ->
-    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is an embedded">>,
+    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is an embedded ">>,
                <<"'asmjs' application and can't be downloaded: ">>, endl,
-               <<"  [IGNASMJS] ">>, Path]).
+               <<"  [IGN:ASMJSAPP] ">>, Path]);
+log_ignored(stream, Pid, Path) ->
+    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is a stream link ">>,
+               <<"and can't be downloaded: ">>, endl,
+               <<"  [IGN:__STREAM] ">>, Path]).
 
 log_excluded(Pid, Path, Match, Subject) ->
     yolog:tin([<<"Process ">>, Pid, <<" finished, excluded pattern '">>, Match,
@@ -414,7 +418,9 @@ spawn_one(LogPid, TrDir, Line, Item, St) ->
 
 get_download_name(#{platform := Platform, name := Name, machname := MName}) ->
     Sep = <<" - ">>,
-    << Platform/binary, Sep/binary, Name/binary, Sep/binary, MName/binary >>.
+    << Platform/binary, Sep/binary, Name/binary, Sep/binary, MName/binary >>;
+get_download_name(#{platform := Platform, machname := MName}) ->
+    << Platform/binary, <<" - ">>/binary, MName/binary >>.
 
 start_one(LogPid, Parent, TrDir, Path, Item, St) ->
     proc_lib:init_ack(Parent, {ok, self()}),
@@ -422,6 +428,10 @@ start_one(LogPid, Parent, TrDir, Path, Item, St) ->
 
 start_one(LogPid, _, Path, #{url := undefined, platform := <<"asmjs">>}, _) ->
     found_ignored(LogPid, asmjs, Path),
+    exit(normal);
+start_one(LogPid, _, Path, #{url := undefined, stream := Stream}, _)
+  when is_binary(Stream) ->
+    found_ignored(LogPid, stream, Path),
     exit(normal);
 start_one(LogPid, TrDir, Path, Item, St) ->
     record_process(LogPid, self()),
