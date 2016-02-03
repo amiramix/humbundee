@@ -1,4 +1,4 @@
-%% Copyright (c) 2015, Grzegorz Junka
+%% Copyright (c) 2016, Grzegorz Junka
 %% All rights reserved.
 %%
 %% Redistribution and use in source and binary forms, with or without
@@ -44,10 +44,10 @@ init([Cfg]) ->
     ?LOG_SUPERVISOR_INIT(?SERVER),
 
     EventMngr = ?WORKER(hbd_event),
-    PoolMngr = ?WORKER2(hbd_pool, Cfg),
-    ApiMngr  = ?WORKER2(hbd_api, Cfg),
+    IdxMngr   = ?WORKER(hbd_idx),
+    PoolMngr  = ?WORKER2(hbd_pool, Cfg),
+    ApiMngr   = ?WORKER2(hbd_api, Cfg),
 
-    Children = [EventMngr, PoolMngr, ApiMngr],
+    Children = [EventMngr, IdxMngr, PoolMngr, ApiMngr],
 
-    lager:debug(<<"Creating supervisor tree:~p">>, [Children]),
     {ok, {{one_for_one, 2, 10}, Children}}.

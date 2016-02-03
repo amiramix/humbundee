@@ -30,7 +30,8 @@
          start_link/1,
          download/1,
          status/0,
-         status/1
+         status/1,
+         index/1
         ]).
 
 %% gen_server callbacks
@@ -52,11 +53,13 @@ start_link(Cfg) ->
     ?LOG_WORKER(?MODULE),
     gen_server:start_link({local, ?MODULE}, ?MODULE, [Cfg], []).
 
-download(Id) when is_binary(Id) -> gen_server:cast(?MODULE, {download, Id}).
+download(Id) -> gen_server:call(?MODULE, {download, Id, normal}).
 
 status() -> hbd_pool:status().
 
-status(Id) when is_binary(Id) -> gen_server:call(?MODULE, {status, Id}).
+status(Id) -> gen_server:call(?MODULE, {status, Id}).
+
+index(Id) -> gen_server:call(?MODULE, {download, Id, idx_add}).
 
 %%% gen_server callbacks
 init([Cfg]) ->
@@ -64,14 +67,15 @@ init([Cfg]) ->
     process_flag(trap_exit, true),
     {ok, #st{cfg = Cfg, ids = #{}, pids = #{}}}.
 
+handle_call({download, Id, Mode}, _From, State) ->
+    {Res, NewSt} = download_id(Id, Mode, State),
+    {reply, Res, NewSt};
 handle_call({status, Id}, _From, State) ->
     {reply, status_id(Id, State), State};
 handle_call(_, {Pid, _Tag}, State) ->
     exit(Pid, badarg),
     {noreply, State}.
 
-handle_cast({download, Id}, State) ->
-    {noreply, download_id(Id, State)};
 handle_cast(_, State) ->
     {noreply, State}.
 
@@ -88,25 +92,24 @@ code_change(_OldVsn, State, _Extra) ->
 
 %%% Internal methods
 
-download_id(Id, #st{ids = Ids} = State) ->
+download_id(Id, Mode, #st{ids = Ids} = State) ->
     case maps:is_key(Id, Ids) of
         true ->
-            yio:en(<<"Id '">>, Id, <<"' already downloading. Ignoring...">>),
-            State;
+            ylog:in(<<"Id '">>, Id, <<"' already downloading. Ignoring...">>),
+            {{error, einprogress}, State};
         false ->
-            start_download(Id, State)
+            start_download(Id, Mode, State)
     end.
 
-start_download(Id, #st{cfg = Cfg, ids = Ids, pids = Pids} = State) ->
-    case hbd_id:start_link(Cfg, Id) of
+start_download(Id, Mode, #st{cfg = Cfg, ids = Ids, pids = Pids} = State) ->
+    case hbd_id:start_link(Cfg, Id, Mode) of
         {ok, Pid} ->
-            yio:in(<<"Started downloading for ID: ">>, Id),
             ylog:tin(<<"Download started for ID: ">>, Id),
             hbd_id:start_download(Pid),
-            State#st{ids = Ids#{Id => Pid}, pids = Pids#{Pid => Id}};
+            {ok, State#st{ids = Ids#{Id => Pid}, pids = Pids#{Pid => Id}}};
         {error, _} = Err ->
-            yio:en(<<"Can't start the download, error: ">>, Err, endl),
-            State
+            ylog:in(<<"Can't start the download, error: ">>, Err, endl),
+            {Err, State}
     end.
 
 %%------------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-%% Copyright (c) 2015, Grzegorz Junka
+%% Copyright (c) 2016, Grzegorz Junka
 %% All rights reserved.
 %%
 %% Redistribution and use in source and binary forms, with or without
@@ -47,10 +47,10 @@ is_cmd(App) ->
 check_deps([]) ->
     true;
 check_deps(App) ->
-    yio:errorn(<<"Error: Humbundee requires that wget and qbittorrent-nox \n">>,
-               <<"are installed in the system. The following applications ">>,
-               <<"couldn't be found:">>),
-    [yio:error(<<X/binary, <<"\n">>/binary >>) || X <- App],
+    ylog:in(<<"Error: Humbundee requires that wget and qbittorrent-nox \n">>,
+            <<"are installed in the system. The following applications ">>,
+            <<"couldn't be found:">>),
+    [ylog:i(<<X/binary, <<"\n">>/binary >>) || X <- App],
     throw(no_deps).
 
 %%------------------------------------------------------------------------------
@@ -69,7 +69,7 @@ read_config() ->
             dest    => yolf:to_binary(Des),
             regex   => application:get_env(humbundee, exclude_regex_list, []),
             workers => yolf:to_integer(Wrk)},
-    yio:in(<<"Read config:">>, endl, Cfg, endl),
+    ylog:in(<<"Read config:">>, endl, Cfg, endl),
     Cfg.
 
 add_user_config(Cfg) ->
@@ -77,10 +77,10 @@ add_user_config(Cfg) ->
     File = filename:join(get_home(), Name),
     case file:consult(File) of
         {ok, UserCfg} ->
-            yio:in(<<"Read user config:">>, endl, UserCfg, endl),
+            ylog:in(<<"Read user config:">>, endl, UserCfg, endl),
             merge_configs(Cfg, UserCfg);
         {error, _} ->
-            yio:en(<<"Can't read user config '">>, File, <<"'. Ignoring...">>),
+            ylog:in(<<"Can't read user config '">>, File, <<"'. Ignoring...">>),
             Cfg
     end.
 
@@ -91,7 +91,7 @@ get_home() ->
     end.
 
 no_home() ->
-    yio:en(<<"Error: Environment variable 'HOME' not set!">>),
+    ylog:in(<<"Error: Environment variable 'HOME' not set!">>),
     throw(no_home).
 
 merge_configs(Cfg0, UserCfg) ->
@@ -158,7 +158,7 @@ validate_cfg(#{cookie := Cookie, in := In, tmp := Tmp, dest := Dest}) ->
     check_empty(Tmp, <<"Temp">>, temp_dir_not_empty).
 
 no_cookie(Cookie) ->
-    yio:en(<<"Cookie file '">>, Cookie, <<"' doesn't exist, exiting.">>),
+    ylog:in(<<"Cookie file '">>, Cookie, <<"' doesn't exist, exiting.">>),
     throw(no_cookie).
 
 ensure_dir(Dir, Name, Type) ->
@@ -168,8 +168,8 @@ ensure_dir(Dir, Name, Type) ->
     end.
 
 no_dir(Name, Type, Dir, Err) ->
-    yio:en(Name, <<" directory '">>, Dir, <<", doesn't exist and couldn't ">>,
-           <<" be created, error: ">>, Err, <<". Exiting.">>),
+    ylog:in(Name, <<" directory '">>, Dir, <<", doesn't exist and couldn't ">>,
+            <<" be created, error: ">>, Err, <<". Exiting.">>),
     throw(Type).
 
 check_empty(Dir, Name, Type) ->
@@ -179,21 +179,21 @@ check_empty(Dir, Name, Type) ->
     end.
 
 not_empty(Name, Type, Dir) ->
-    yio:en(Name, <<" directory '">>, Dir, <<", is not empty. Exiting.">>),
+    ylog:in(Name, <<" directory '">>, Dir, <<", is not empty. Exiting.">>),
     throw(Type).
 
 %%------------------------------------------------------------------------------
 
 start_qbt() ->
-    yio:i(<<"Starting qbittorrent daemon... ">>),
+    ylog:i(<<"Starting qbittorrent daemon... ">>),
     case yexec:sh_cmd(<<"qbittorrent-nox -d">>) of
         {0, _} ->
-            yio:in(<<"OK">>),
+            ylog:in(<<"OK">>),
             ok;
         {1, _} ->
-            yio:in(<<"Already started.">>),
+            ylog:in(<<"Already started.">>),
             ok;
         Err ->
-            yio:en(<<"Error: ">>, Err),
+            ylog:in(<<"Error: ">>, Err),
             throw(no_qbt)
     end.

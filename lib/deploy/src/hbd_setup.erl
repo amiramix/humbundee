@@ -22,31 +22,37 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(humbundee).
+-module(hbd_setup).
 
--export([download/1, status/0, status/1, index/1, read/1]).
+-export([install/2]).
 
-download(Id) -> check(fun(X) -> hbd_api:download(X) end, Id).
+-include_lib("humbundee/include/humbundee.hrl").
 
-status() -> hbd_api:status().
+log(F, A) -> io:format("~p:~p: " ++ F ++ "~n", [?MODULE, ?LINE] ++ A).
 
-status(Id) -> check(fun(X) -> hbd_api:status(X) end, Id).
+install({_Id, Node}, SetupCfg) ->
+    Config = bld_cfg:load_config(SetupCfg),
+    log("Config file: ~p~n", [Config]),
 
-index(Id) -> check(fun(X) -> hbd_api:index(X) end, Id).
+    ok = mnesia:create_schema([Node]),
+    mnesia:start(),
 
-read(Sum) -> check(fun(X) -> hbd_idx:read(X) end, Sum).
+    SetupApp = proplists:get_value(setup_app, SetupCfg),
+    Src = proplists:get_value(hbd_mnesia_backup, Config),
+    Source = filename:join(code:priv_dir(SetupApp), Src),
+    case filelib:is_regular(Source) of
+        false -> init_db(Node);
+        true -> import_db(Source)
+    end,
+    ok.
 
-check(Fun, Val) ->
-    Bin = yolf:to_binary(Val),
-    case is_valid(Bin) of
-        true -> Fun(Bin);
-        {false, X} -> {error, {invalid_char, X}}
-    end.
+init_db(Node) ->
+    log("DB backup not found, initializing an empty DB.", []),
+    Options = [{type, bag}, {attributes, record_info(fields, idx)},
+               {disc_copies, [Node]}, {index, [sha1, md5]}],
+    mnesia:create_table(idx, Options).
 
-is_valid(<<X,T/binary>>)
-  when X >= $0, X =< $9; X >= $a, X =< $z; X >= $A, X =< $Z ->
-    is_valid(T);
-is_valid(<<X,_/binary>>) ->
-    {false, X};
-is_valid(<<>>) ->
-    true.
+import_db(Source) ->
+    log("Importing DB backup ~p", [Source]),
+    Options = [{default_op, skip_tables}, {recreate_tables, [idx]}],
+    {atomic, [idx]} = mnesia:restore(Source, Options).

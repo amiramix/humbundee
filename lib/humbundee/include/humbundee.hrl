@@ -22,31 +22,4 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--module(humbundee).
-
--export([download/1, status/0, status/1, index/1, read/1]).
-
-download(Id) -> check(fun(X) -> hbd_api:download(X) end, Id).
-
-status() -> hbd_api:status().
-
-status(Id) -> check(fun(X) -> hbd_api:status(X) end, Id).
-
-index(Id) -> check(fun(X) -> hbd_api:index(X) end, Id).
-
-read(Sum) -> check(fun(X) -> hbd_idx:read(X) end, Sum).
-
-check(Fun, Val) ->
-    Bin = yolf:to_binary(Val),
-    case is_valid(Bin) of
-        true -> Fun(Bin);
-        {false, X} -> {error, {invalid_char, X}}
-    end.
-
-is_valid(<<X,T/binary>>)
-  when X >= $0, X =< $9; X >= $a, X =< $z; X >= $A, X =< $Z ->
-    is_valid(T);
-is_valid(<<X,_/binary>>) ->
-    {false, X};
-is_valid(<<>>) ->
-    true.
+-record(idx, {id, sha1, md5, status, data}).
