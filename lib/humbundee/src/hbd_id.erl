@@ -71,7 +71,7 @@ file_started(Pid, File) ->
     gen_server:cast(Pid, {fetching, File}).
 
 warn_bad_sha1(Pid, File) ->
-    gen_server:cast(Pid, {bad_sha1, File}).
+    process_warning(Pid, bad_sha1, File).
 
 stale_detected(Pid, File) ->
     gen_server:cast(Pid, {stale, File}).
@@ -122,12 +122,6 @@ handle_cast({add, Pid}, #st{pids = Set} = St) ->
     {noreply, St#st{pids = sets:add_element(Pid, Set)}};
 handle_cast({remove, Pid}, State) ->
     check_done(ok, Pid, State);
-handle_cast({ignored, Pid, Type, Args}, State) ->
-    log_ignored(Type, Pid, Args),
-    check_done(ignored, Pid, State);
-handle_cast({excluded, Pid, Path, Match, Subject}, State) ->
-    log_excluded(Pid, Path, Match, Subject),
-    check_done(excluded, Pid, State);
 handle_cast({torrent, Pid, Cmd}, State) ->
     log_torrent(Pid, Cmd),
     {noreply, State};
@@ -137,21 +131,27 @@ handle_cast({added, File, TrFile}, State) ->
 handle_cast({fetching, File}, State) ->
     log_fetching_file(File),
     {noreply, State};
-handle_cast({bad_sha1, File}, State) ->
-    log_bad_sha1(File),
-    {noreply, State};
 handle_cast({stale, File}, State) ->
     log_stale_file(File),
     {noreply, State};
 handle_cast({downloaded, File}, State) ->
     log_downloaded(File),
     {noreply, State};
-handle_cast({stale_err, File, Err, DelRes}, State) ->
-    log_error(stale_err, {File, Err, DelRes}),
-    {noreply, State};
 handle_cast({done, Pid, Name}, State) ->
     log_done(Pid, Name),
     check_done(done, Pid, State);
+handle_cast({excluded, Pid, Path, Match, Subject}, State) ->
+    log_excluded(Pid, Path, Match, Subject),
+    check_done(excluded, Pid, State);
+handle_cast({ignored, Pid, Type, Args}, State) ->
+    log_ignored(Type, Pid, Args),
+    check_done(ignored, Pid, State);
+handle_cast({warn, Type, Args}, State) ->
+    log_warning(Type, Args),
+    {noreply, State};
+handle_cast({stale_err, File, Err, DelRes}, State) ->
+    log_error(stale_err, {File, Err, DelRes}),
+    {noreply, State};
 handle_cast({error, Pid, Type, Args}, State) ->
     log_error(Type, Pid, Args),
     check_done(error, Pid, State);
@@ -186,18 +186,21 @@ record_process(LPid) ->
 finish_process(LPid, Pid) ->
     gen_server:cast(LPid, {remove, Pid}).
 
-found_ignored(LPid, Type, Args) ->
-    gen_server:cast(LPid, {ignored, self(), Type, Args}).
-
-found_excluded(LPid, Path, Match, Subject) ->
-    gen_server:cast(LPid, {excluded, self(), Path, Match, Subject}).
-
 torrent_finished(LPid, Cmd) ->
     gen_server:cast(LPid, {torrent, self(), Cmd}).
 
 download_finished(LPid, Name) ->
     gen_server:cast(LPid, {done, self(), Name}),
     done.
+
+found_excluded(LPid, Path, Match, Subject) ->
+    gen_server:cast(LPid, {excluded, self(), Path, Match, Subject}).
+
+process_ignored(LPid, Type, Args) ->
+    gen_server:cast(LPid, {ignored, self(), Type, Args}).
+
+process_warning(LPid, Type, Args) ->
+    gen_server:cast(LPid, {warn, Type, Args}).
 
 process_error(LPid, Type, Args) ->
     gen_server:cast(LPid, {error, self(), Type, Args}),
@@ -213,24 +216,6 @@ log_download(Pid, Line) ->
     yolog:in(<<"Started pid: ">>, Pid, <<" to download: ">>, endl,
              <<"  [NEW_DOWN] ">>, Line).
 
-log_ignored(in_idx, Pid, {Sha1, Md5, Path}) ->
-    yolog:tin([<<"Process '">>, Pid, <<"' finished, entry with Sha1 '">>,
-               Sha1, <<"' and/or Md5 '">>, Md5,
-               <<"' was found in the index of downloaded files: ">>, endl,
-               <<"  [IGN:IDXEXIST] ">>, Path]);
-log_ignored(asmjs, Pid, Path) ->
-    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is an embedded ">>,
-               <<"'asmjs' application and can't be downloaded: ">>, endl,
-               <<"  [IGN:ASMJSAPP] ">>, Path]);
-log_ignored(stream, Pid, Path) ->
-    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is a stream link ">>,
-               <<"and can't be downloaded: ">>, endl,
-               <<"  [IGN:__STREAM] ">>, Path]).
-
-log_excluded(Pid, Path, Match, Subject) ->
-    yolog:tin([<<"Process ">>, Pid, <<" finished, excluded pattern '">>, Match,
-               <<"' found in subject '">>, Subject, <<"', download:">>, endl,
-               <<"  [EXCLDOWN] ">>, Path]).
 
 log_torrent(Pid, Cmd) ->
     yolog:tin(<<"Success, process ">>, Pid,
@@ -246,10 +231,6 @@ log_fetching_file(File) ->
     yolog:tin([<<"Started downloading file:">>, endl,
                <<"  [FILEDOWN] ">>, File]).
 
-log_bad_sha1(File) ->
-    yolog:tin([<<"Warning, incorrect SHA1 sum for file:">>, endl,
-               <<"  [WARNSHA1] ">>, File]).
-
 log_stale_file(File) ->
     yolog:tin([<<"Detected stale file, will try to download with 'wget':">>,
                endl, <<"  [STALEFIL] ">>, File]).
@@ -258,9 +239,47 @@ log_downloaded(File) ->
     yolog:tin([<<"Finished downloading file with 'wget':">>, endl,
                <<"  [WGETDONE] ">>, File]).
 
+
 log_done(Pid, Name) ->
     yolog:tin(<<"Process ">>, Pid, <<" finished downloading: ">>, endl,
               <<"  [FILEDONE] ">>, Name).
+
+
+log_excluded(Pid, Path, Match, Subject) ->
+    yolog:tin([<<"Process ">>, Pid, <<" finished, excluded pattern '">>, Match,
+               <<"' found in subject '">>, Subject, <<"', download:">>, endl,
+               <<"  [EXCLDOWN] ">>, Path]).
+
+
+log_ignored(in_idx, Pid, {Sha1, Md5, Path}) ->
+    yolog:tin([<<"Process '">>, Pid, <<"' finished, entry with Sha1 '">>,
+               Sha1, <<"' and/or Md5 '">>, Md5,
+               <<"' was found in the index of downloaded files: ">>, endl,
+               <<"  [IGN:IDXEXIST] ">>, Path]);
+log_ignored(asmjs, Pid, Path) ->
+    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is an embedded ">>,
+               <<"'asmjs' application and can't be downloaded: ">>, endl,
+               <<"  [IGN:ASMJSAPP] ">>, Path]);
+log_ignored(stream, Pid, Path) ->
+    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is a stream link ">>,
+               <<"and can't be downloaded: ">>, endl,
+               <<"  [IGN:__STREAM] ">>, Path]).
+
+
+log_warning(no_torrent, {Cmd, Err}) ->
+    yolog:tin([<<"Couldn't download torrent with command: ">>, endl,
+               <<"  [WRN:TOR_DOWN] ">>, Cmd, endl, <<"reason: ">>, Err]);
+log_warning(bad_torrent, {Name, Err}) ->
+    yolog:tin([<<"Downloaded torrent file couldn't be parsed: ">>, endl,
+               <<"  [WRN:BAD__TOR] ">>, Name, endl, <<"reason: ">>, Err]);
+log_warning(torrent_size, {Name, Path, Size}) ->
+    yolog:tin([<<"File size in the torrent ">>, Size,
+               <<" differs from the size reported in JSON for:">>, endl,
+               <<"  [WRN:SIZEFILE] ">>, Name, endl,
+               <<"  [WRN:SIZEPATH] ">>, Path]);
+log_warning(bad_sha1, File) ->
+    yolog:tin([<<"Warning, incorrect SHA1 sum for file:">>, endl,
+               <<"  [WRN:BAD_SHA1] ">>, File]).
 
 
 log_error(Type, Pid, Args) ->
@@ -270,8 +289,6 @@ log_error(Type, Pid, Args) ->
 log_error(mkdir, {Path, Err}) ->
     [<<"  Couldn't create the destination folder/torrent:">>, endl,
      <<"  [ERR:BAD_PATH] ">>, Path, endl, <<"reason: ">>, Err];
-log_error(bad_torrent, {Name, Err}) ->
-    [<<"  [ERR:BAD__TOR] ">>, Name, endl, <<"reason: ">>, Err];
 log_error(duplicate, {Name, Path, OtherRec}) ->
     [<<"  Duplicate file name, already downloading file/torrent:">>, endl,
      <<"  [ERR:DUPLFILE] ">>, Name, endl,
@@ -282,14 +299,6 @@ log_error(torrent_cmd, {Name, Path, Err}) ->
     [<<"  Couldn't start bittorrent download:">>, endl,
      <<"  [ERR:BADCMDFI] ">>, Name, endl,
      <<"  [ERR:BADCMDPA] ">>, Path, endl, <<"reason: ">>, Err];
-log_error(no_torrent, {Cmd, Err}) ->
-    [<<"  Couldn't download torrent with command: ">>, endl,
-     <<"  [ERR:TOR_DOWN] ">>, Cmd, endl, <<"reason: ">>, Err];
-log_error(torrent_size, {Name, Path, Size}) ->
-    [<<"  File size stored in the torrent ">>, Size,
-     <<" differs from the size reported in the JSON file for:">>, endl,
-     <<"  [ERR:TRSIZEFI] ">>, Name, endl,
-     <<"  [ERR:TRSIZEPA] ">>, Path];
 log_error(bad_size, {Name, Path}) ->
     [<<"  Incorrect size of the downloaded file/torrent:">>, endl,
      <<"  [ERR:BADSIZEF] ">>, Name, endl,
@@ -314,6 +323,7 @@ log_error(stale_err, {Name, Err, DelRes}) ->
 log_error(error, {Name, Path, Err}) ->
     [<<"  [ERR:GEN_FILE] ">>, Name, endl,
      <<"  [ERR:GEN_PATH] ">>, Path, endl, <<"reason: ">>, Err].
+
 
 log_exit(Pid, Reason) ->
     yolog:tin(<<"[ERR:PROCEXIT] Process ">>, Pid,
@@ -430,23 +440,22 @@ spawn_one(LogPid, TrDir, Line, #{platform := Platform} = Item, St) ->
 
 start_one(LogPid, Parent, TrDir, Path, Item, St) ->
     proc_lib:init_ack(Parent, {ok, self()}),
-    #{sha1 := Sha1, md5 := Md5} = Item,
-    case hbd_idx:exists(Sha1, Md5) of
-        false -> start_one(LogPid, TrDir, Path, Item, St);
-        true -> found_ignored(LogPid, in_idx, {Sha1, Md5, Path})
+    record_process(LogPid),
+    case Item of
+        #{url := undefined, platform := <<"asmjs">>} ->
+            process_ignored(LogPid, asmjs, Path);
+        #{url := undefined, stream := Stream} when is_binary(Stream) ->
+            process_ignored(LogPid, stream, Path);
+        #{sha1 := Sha1, md5 := Md5, size := Size} ->
+            case hbd_idx:exists(Sha1, Md5, Size) of
+                false -> start_one(LogPid, TrDir, Path, Item, St);
+                true -> process_ignored(LogPid, in_idx, {Sha1, Md5, Path})
+            end;
+        _ ->
+            exit(bad_json)
     end.
 
-start_one(LogPid, _, Path,
-          #{url := undefined, platform := <<"asmjs">>} = Item, St) ->
-    found_ignored(LogPid, asmjs, Path),
-    add_to_idx(St#st.id, ignored, Item);
-start_one(LogPid, _, Path,
-          #{url := undefined, stream := Stream} = Item, St)
-  when is_binary(Stream) ->
-    found_ignored(LogPid, stream, Path),
-    add_to_idx(St#st.id, ignored, Item);
 start_one(LogPid, TrDir, Path, Item, St) ->
-    record_process(LogPid),
     exit_if_excluded(LogPid, Path, Item, St),
     Torrent = maps:get(torrent, Item),
     TrCmd = torrent_cmd(TrDir, Torrent, St#st.cookie),
@@ -468,9 +477,9 @@ start_one1(LogPid, normal = Mode, TrCmd, Path, DRec) ->
 start_one1(LogPid, idx_add = Mode, TrCmd, _Path, DRec) ->
     do_download(LogPid, Mode, TrCmd, DRec).
 
-add_to_idx(Id, Status, #{sha1 := Sha1, md5 := Md5} = Item) ->
-    Data = maps:without([sha1, md5, name, torrent, machname], Item),
-    hbd_idx:add(Id, Sha1, Md5, Status, Data).
+add_to_idx(Id, Status, #{sha1 := Sha1, md5 := Md5, size := Size} = Item) ->
+    Data = maps:without([sha1, md5, size, name, torrent, machname], Item),
+    hbd_idx:add(Id, Sha1, Md5, Size, Status, Data).
 
 %%------------------------------------------------------------------------------
 
@@ -535,7 +544,8 @@ do_download(LogPid, Mode, {Cmd, TrFile}, DRec) ->
             torrent_finished(LogPid, Cmd),
             check_torrent(LogPid, Mode, TrFile, DRec);
         Err ->
-            process_error(LogPid, no_torrent, {Cmd, Err})
+            process_warning(LogPid, no_torrent, {Cmd, Err}),
+            do_download(LogPid, Mode, undefined, DRec)
     end;
 do_download(LogPid, Mode, undefined, #d{url = Url} = DRec) ->
     NewDRec = DRec#d{file = url_to_file(Url)},
@@ -545,12 +555,13 @@ check_torrent(LogPid, Mode, TrFile, DRec) ->
     case filelib:is_regular(TrFile) andalso
         etorrent_bcoding:parse_file(TrFile) of
         {ok, BCode} -> process_torrent(LogPid, Mode, TrFile, DRec, BCode);
-        false -> bad_torrent(LogPid, TrFile, enoent);
-        {error, Err} -> bad_torrent(LogPid, TrFile, Err)
+        false -> bad_torrent(LogPid, Mode, TrFile, DRec, enoent);
+        {error, Err} -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
     end.
 
-bad_torrent(LogPid, TrFile, Err) ->
-    process_error(LogPid, bad_torrent, {TrFile, Err}).
+bad_torrent(LogPid, Mode, TrFile, DRec, Err) ->
+    process_warning(LogPid, bad_torrent, {TrFile, Err}),
+    do_download(LogPid, Mode, undefined, DRec).
 
 process_torrent(LogPid, Mode, TrFile, DRec, BCode) ->
     %% Support for torrents with multiple files probably not needed
@@ -560,8 +571,9 @@ process_torrent(LogPid, Mode, TrFile, DRec, BCode) ->
 
 process_download(LogPid, Mode, Size, #d{size = Size} = DRec) ->
     process_download(LogPid, Mode, DRec);
-process_download(LogPid, _Mode, Size, #d{path = Path, file = File}) ->
-    process_error(LogPid, torrent_size, {File, Path, Size}).
+process_download(LogPid, Mode, Size, #d{path = Path, file = File} = DRec) ->
+    process_warning(LogPid, torrent_size, {File, Path, Size}),
+    do_download(LogPid, Mode, undefined, DRec#d{torrent = undefined}).
 
 process_download(LogPid, normal, #d{path = Path, file = File} = DRec) ->
     case hbd_pool:do_download(DRec) of

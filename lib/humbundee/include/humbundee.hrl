@@ -22,4 +22,4 @@
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
--record(idx, {id, sha1, md5, status, data}).
+-record(idx, {id, sha1, md5, size, status, data}).

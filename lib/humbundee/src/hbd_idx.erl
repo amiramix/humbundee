@@ -28,9 +28,10 @@
 %% API
 -export([
          start_link/0,
-         add/5,
-         exists/2,
-         read/1
+         add/6,
+         exists/3,
+         read/1,
+         delete/1
         ]).
 
 %% gen_server callbacks
@@ -52,14 +53,17 @@ start_link() ->
     ?LOG_WORKER(?SERVER),
     gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
 
-add(Id, Sha1, Md5, Status, Data) ->
-    gen_server:cast(?SERVER, {add, Id, Sha1, Md5, Status, Data}).
+add(Id, Sha1, Md5, Size, Status, Data) ->
+    gen_server:cast(?SERVER, {add, Id, Sha1, Md5, Size, Status, Data}).
 
-exists(Sha1, Md5) ->
-    gen_server:call(?SERVER, {exists, Sha1, Md5}).
+exists(Sha1, Md5, Size) ->
+    gen_server:call(?SERVER, {exists, Sha1, Md5, Size}).
 
 read(Sum) ->
     gen_server:call(?SERVER, {read, Sum}).
+
+delete(Sum) ->
+    gen_server:call(?SERVER, {delete, Sum}).
 
 %%------------------------------------------------------------------------------
 %%% gen_server callbacks
@@ -68,16 +72,18 @@ init([]) ->
     ?LOG_WORKER_INIT(?SERVER),
     {ok, []}.
 
-handle_call({exists, Sha1, Md5}, _From, State) ->
-    {reply, check(Sha1, Md5), State};
+handle_call({exists, Sha1, Md5, Size}, _From, State) ->
+    {reply, check(Sha1, Md5, Size), State};
 handle_call({read, Sum}, _From, State) ->
     {reply, do_read(Sum), State};
+handle_call({delete, Sum}, _From, State) ->
+    {reply, do_delete(Sum), State};
 handle_call(_, {Pid, _Tag}, State) ->
     exit(Pid, badarg),
     {noreply, State}.
 
-handle_cast({add, Id, Sha1, Md5, Status, Data}, State) ->
-    store(Id, Sha1, Md5, Status, Data),
+handle_cast({add, Id, Sha1, Md5, Size, Status, Data}, State) ->
+    store(Id, Sha1, Md5, Size, Status, Data),
     {noreply, State};
 handle_cast(_, State) ->
     {noreply, State}.
@@ -94,46 +100,80 @@ code_change(_OldVsn, State, _Extra) ->
 %%------------------------------------------------------------------------------
 %%% Internal methods
 
-store(Id, Sha1, Md5, Status, Data) ->
-    Rec = #idx{id = Id, sha1 = to_db(Sha1), md5 = to_db(Md5),
-               status = Status, data = Data},
+store(_, undefined, undefined, _, _, _) ->
+    ok;
+store(Id, Sha1, Md5, Size, Status, Data) ->
+    {ISha1, IMd5, Recs} = read_recs(Sha1, Md5),
+    [mnesia:dirty_delete_object(R) ||
+        R <- duplicates(ISha1, IMd5, Size, Recs, [])],
+
+    Rec = #idx{id = Id, sha1 = to_store(ISha1), md5 = to_store(IMd5),
+               size = Size, status = Status, data = Data},
     ok = mnesia:dirty_write(Rec).
 
+read_recs(Sha1, Md5) ->
+    ISha1 = to_int(Sha1),
+    IMd5  = to_int(Md5),
+    {ISha1, IMd5, get_recs(ISha1, #idx.sha1) ++ get_recs(IMd5, #idx.md5)}.
+
+to_int(undefined) -> undefined;
+to_int(Sum) -> binary_to_integer(Sum, 16).
+
+get_recs(undefined, _Pos) -> [];
+get_recs(ISum, Pos) -> mnesia:dirty_index_read(idx, ISum, Pos).
+
+duplicates(Sha1, Md5, S,
+           [#idx{sha1 = Sha1, md5 = Md5, size = S} = R|T], Acc) ->
+    duplicates(Sha1, Md5, S, T, [R|Acc]);
+duplicates(undefined = Sha1, Md5, S,
+           [#idx{sha1 = {_,_}, md5 = Md5, size = S} = R|T], Acc) ->
+    duplicates(Sha1, Md5, S, T, [R|Acc]);
+duplicates(Sha1, undefined = Md5, S,
+           [#idx{sha1 = Sha1, md5 = {_,_}, size = S} = R|T], Acc) ->
+    duplicates(Sha1, Md5, S, T, [R|Acc]);
+duplicates(Sha1, Md5, S, [_|T], Acc) ->
+    duplicates(Sha1, Md5, S, T, Acc);
+duplicates(_, _, _, [], Acc) ->
+    Acc.
+
 %% Avoid uncontrolled expansion of secondary indexes
-to_db(undefined) ->
+to_store(undefined) ->
     {A, B, _} = os:timestamp(),
     {A, B};
-to_db(Sum) ->
-    binary_to_integer(Sum, 16).
+to_store(Int) ->
+    Int.
 
 
-check(Sha1, Md5) ->
-    check1(get_rec(Sha1, #idx.sha1), get_rec(Md5, #idx.md5)).
+check(Sha1, Md5, Size) ->
+    {ISha1, IMd5, Recs} = read_recs(Sha1, Md5),
+    check(ISha1, IMd5, Size, Recs).
 
-get_rec(undefined, _Pos) ->
-    undefined;
-get_rec(Sum, Pos) ->
-    ISum = to_db(Sum),
-    case mnesia:dirty_index_read(idx, ISum, Pos) of
-        [#idx{sha1 = Sha1, md5 = Md5} = Rec] ->
-            Rec#idx{sha1 = undummy(Sha1), md5 = undummy(Md5)};
-        _ ->
-            false
-    end.
+check( Sha1,  Md5,  S, [#idx{sha1 = Sha1,  md5 = Md5,   size = S}|_]) -> true;
+check(_Sha1,  Md5,  S, [#idx{sha1 = {_,_}, md5 = Md5,   size = S}|_]) -> true;
+check( Sha1, _Md5,  S, [#idx{sha1 = Sha1,  md5 = {_,_}, size = S}|_]) -> true;
+check( Sha1,  Md5,  S, [_|T])  -> check(Sha1, Md5, S, T);
+check(_Sha1, _Md5, _S, [])     -> false.
 
-undummy({_,_}) -> undefined;
-undummy(X) -> X.
-
-check1(false, false) -> false;
-check1(undefined, false) -> false;
-check1(undefined, #idx{sha1 = undefined}) -> true;
-check1(#idx{md5 = undefined}, undefined) -> true;
-check1(Rec, Rec) -> true;
-check1(_, _) -> false.
-
+%%------------------------------------------------------------------------------
 
 do_read(Sum) ->
-    get_list(Sum, #idx.sha1) ++ get_list(Sum, #idx.md5).
+    [format_rec(Rec) || Rec <- do_read1(is_hex(Sum), Sum)].
+
+do_delete(Sum) ->
+    [mnesia:dirty_delete_object(Rec) || Rec <- do_read1(is_hex(Sum), Sum)].
+
+
+is_hex(<<X,T/binary>>)
+  when X >= $0, X =< $9; X >= $a, X =< $f; X >= $A, X =< $F ->
+    is_hex(T);
+is_hex(<<_X,_/binary>>) ->
+    false;
+is_hex(<<>>) ->
+    true.
+
+format_rec(#idx{sha1 = Sha1, md5 = Md5} = OldRec) ->
+    Rec =  OldRec#idx{sha1 = from_db(Sha1), md5 = from_db(Md5)},
+    yolf:to_map(record_info(fields, idx), Rec).
 
 from_db({_,_}) ->
     undefined;
@@ -142,9 +182,7 @@ from_db(Int) ->
     Fun = fun(X) when X >= $A, X =< $Z -> X + 32; (X) -> X end,
     << <<(Fun(X))>> || <<X>> <= Bin >>.
 
-get_list(Sum, Pos) ->
-    [format_rec(Rec) || Rec <- mnesia:dirty_index_read(idx, to_db(Sum), Pos)].
+do_read1(false, Id) -> mnesia:dirty_read(idx, Id);
+do_read1(true, Sum) -> read_sum(Sum, #idx.sha1) ++ read_sum(Sum, #idx.md5).
 
-format_rec(#idx{sha1 = Sha1, md5 = Md5} = OldRec) ->
-    Rec =  OldRec#idx{sha1 = from_db(Sha1), md5 = from_db(Md5)},
-    yolf:to_map(record_info(fields, idx), Rec).
+read_sum(Sum, Pos) -> mnesia:dirty_index_read(idx, to_int(Sum), Pos).

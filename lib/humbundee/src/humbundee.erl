@@ -24,7 +24,7 @@
 
 -module(humbundee).
 
--export([download/1, status/0, status/1, index/1, read/1]).
+-export([download/1, status/0, status/1, index/1, read/1, delete/1]).
 
 download(Id) -> check(fun(X) -> hbd_api:download(X) end, Id).
 
@@ -35,6 +35,8 @@ status(Id) -> check(fun(X) -> hbd_api:status(X) end, Id).
 index(Id) -> check(fun(X) -> hbd_api:index(X) end, Id).
 
 read(Sum) -> check(fun(X) -> hbd_idx:read(X) end, Sum).
+
+delete(Sum) -> check(fun(X) -> hbd_idx:delete(X) end, Sum).
 
 check(Fun, Val) ->
     Bin = yolf:to_binary(Val),
