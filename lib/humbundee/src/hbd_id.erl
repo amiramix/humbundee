@@ -396,10 +396,10 @@ id_finished(St, Count, {OK, Ign, Exc, Err}) ->
 
 %%------------------------------------------------------------------------------
 
-do_status(#st{id = Id, url = Url, cookie = Cookie, out = Out, pids = Pids,
-              count = Count, ends = Ends}) ->
-    [{id, Id}, {url, Url}, {cookie, Cookie}, {out, Out}, {count, Count},
-     {ends, Ends}, {pids, sets:to_list(Pids)}].
+do_status(#st{id = Id, cookie = Cookie, out = Out, pids = Pids, count = Count,
+              ends = Ends}) ->
+    [{id, Id}, {cookie, Cookie}, {out, Out}, {count, Count}, {stats, Ends},
+     {pids, sets:to_list(Pids)}].
 
 %%------------------------------------------------------------------------------
 
