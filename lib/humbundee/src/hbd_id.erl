@@ -117,7 +117,8 @@ handle_call(_, {Pid, _Tag}, State) ->
 handle_cast(start, #st{pids = Set} = St) ->
     List = start(St),
     Pids = sets:union(Set, sets:from_list([Pid || {Pid, _} <- List])),
-    {noreply, St#st{pids = Pids, count = lists:sum([X || {_, X} <- List])}};
+    NewSt = St#st{pids = Pids, count = lists:sum([X || {_, X} <- List])},
+    check_done(ok, undefined, NewSt);
 handle_cast({add, Pid}, #st{pids = Set} = St) ->
     {noreply, St#st{pids = sets:add_element(Pid, Set)}};
 handle_cast({remove, Pid}, State) ->

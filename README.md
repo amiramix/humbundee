@@ -41,16 +41,7 @@ You may not want to download installation packages for Mac OS X or Linux 32-bit 
 Sometimes the same game is included in more than one bundle. You are smart enough to not download again games you already downloaded from other bundles (if you remember them). A not-so-smart downloader may try to download everything you throw at it. But not Humbundee. It remembers all downloaded files, not by their names but sizes and MD5/SHA1 checksums, so it knows when a file has been downloaded previously even if it has a different name.
 
 ### Neatly organizes all downloads
-If a bundle contains a few dozens of files you don't want to end up with all of them in a single folder. Humbundee automatically organizes all downloaded files into the following hierarchy of folders:
-
-    Key
-      *- Publisher
-        *- Title - platform
-
- * Key is the alphanumeric set of characters associated with each bundle.
- * Publisher is usually the company behind the digital goods, games, comics, etc.
- * Title is the title of the digital item, a game title, a book title, etc.
- * Platform is one of android, linux, windows, comics, comedy, ebook, audio, etc.
+If a bundle contains a few dozens of files you don't want to end up with all of them in a single folder. Humbundee automatically organizes all downloaded files into a hierarchy of folders under the main folder named after the bundle key. See the configuration section below for more details.
 
 -----
 
@@ -182,12 +173,18 @@ Amount of downloads that can be active at the same time (the sum of downloads th
 A parent folder for completed bundles. All files in completed bundles are stored in subfolders named according to the following pattern:
 
     Key
-      *- Publisher
-        *- Title - platform
+      .etr, .json, .log
+      *_torrents
+      *_data
+        *- Publisher
+          *- Title - platform
 
 Where:
 
  * `Key` is the bundle key, an alphanumeric set of characters associated with each bundle.
+ * `.etr`, `.json`, `.log` are files produced when downloading the bundle.
+ * `_torrents` contains all downloaded torrent files.
+ * `_data` is the parent folder for all downloaded files.
  * `Publisher` is usually the company behind the digital goods, games, comics, etc.
  * `Title` is the title of the digital item, a game title, a book title, etc.
  * `Platform` is one of android, linux, windows, comics, comedy, ebook, audio, etc.
