@@ -251,20 +251,30 @@ log_excluded(Pid, Path, Match, Subject) ->
                <<"' found in subject '">>, Subject, <<"', download:">>, endl,
                <<"  [EXCLDOWN] ">>, Path]).
 
+log_ignored(Type, Pid, Args) ->
+    yolog:tin([<<"Process '">>, Pid, <<"' finished, ">>]
+              ++ log_ignored(Type, Args)).
 
-log_ignored(in_idx, Pid, {Sha1, Md5, Path}) ->
-    yolog:tin([<<"Process '">>, Pid, <<"' finished, entry with Sha1 '">>,
-               Sha1, <<"' and/or Md5 '">>, Md5,
-               <<"' was found in the index of downloaded files: ">>, endl,
-               <<"  [IGN:IDXEXIST] ">>, Path]);
-log_ignored(asmjs, Pid, Path) ->
-    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is an embedded ">>,
-               <<"'asmjs' application and can't be downloaded: ">>, endl,
-               <<"  [IGN:ASMJSAPP] ">>, Path]);
-log_ignored(stream, Pid, Path) ->
-    yolog:tin([<<"Process ">>, Pid, <<" finished, entry is a stream link ">>,
-               <<"and can't be downloaded: ">>, endl,
-               <<"  [IGN:__STREAM] ">>, Path]).
+log_ignored(in_idx, {Sha1, Md5, Path}) ->
+    [<<"entry with Sha1 '">>, Sha1, <<"' and/or Md5 '">>, Md5,
+     <<"' was found in the index of downloaded files: ">>, endl,
+     <<"  [IGN:IDXEXIST] ">>, Path];
+log_ignored(asmjs, Path) ->
+    [<<"entry is an embedded 'asmjs' application and can't be downloaded: ">>,
+     endl,
+     <<"  [IGN:ASMJSAPP] ">>, Path];
+log_ignored(stream, {Path, Stream}) ->
+    [<<"entry is a stream link: ">>, endl,
+     <<"  [IGN:STRMPATH] ">>, Path, endl,
+     <<"  [IGN:STRM_URL] ">>, Stream];
+log_ignored(message, {Path, Msg}) ->
+    [<<"entry is a message: ">>, endl,
+     <<"  [IGN:MSG_PATH] ">>, Path, endl,
+     <<"  [IGN:_MESSAGE] ">>, Msg];
+log_ignored(link, {Path, Link}) ->
+    [<<"entry is an external link: ">>, endl,
+     <<"  [IGN:LINKPATH] ">>, Path, endl,
+     <<"  [IGN:LINK_URL] ">>, Link].
 
 
 log_warning(no_torrent, {Cmd, Err}) ->
@@ -321,6 +331,10 @@ log_error(stale_err, {Name, Err, DelRes}) ->
     [<<"  Couldn't download file with 'wget':">>, endl,
      <<"  [ERR:WGETFILE] ">>, Name, endl, <<"reason: ">>, Err, endl,
      <<"  result of deleting the file: ">>, DelRes];
+log_error(badjson, {Path, Raw}) ->
+    [<<"  Couldn't parse JSON for the download entry: ">>, endl,
+     <<"  [ERR:JSONPATH] ">>, Path, endl,
+     <<"  [ERR:BAD_JSON] ">>, Raw];
 log_error(error, {Name, Path, Err}) ->
     [<<"  [ERR:GEN_FILE] ">>, Name, endl,
      <<"  [ERR:GEN_PATH] ">>, Path, endl, <<"reason: ">>, Err].
@@ -443,17 +457,21 @@ start_one(LogPid, Parent, TrDir, Path, Item, St) ->
     proc_lib:init_ack(Parent, {ok, self()}),
     record_process(LogPid),
     case Item of
-        #{url := undefined, platform := <<"asmjs">>} ->
-            process_ignored(LogPid, asmjs, Path);
-        #{url := undefined, stream := Stream} when is_binary(Stream) ->
-            process_ignored(LogPid, stream, Path);
         #{sha1 := Sha1, md5 := Md5, size := Size} ->
             case hbd_idx:exists(Sha1, Md5, Size) of
                 false -> start_one(LogPid, TrDir, Path, Item, St);
                 true -> process_ignored(LogPid, in_idx, {Sha1, Md5, Path})
             end;
-        _ ->
-            exit(bad_json)
+        #{stream := Stream} ->
+            process_ignored(LogPid, stream, {Path, Stream});
+        #{message := Msg} ->
+            process_ignored(LogPid, message, {Path, Msg});
+        #{link := Link} ->
+            process_ignored(LogPid, link, {Path, Link});
+        #{platform := <<"asmjs">>} ->
+            process_ignored(LogPid, asmjs, Path);
+        #{raw := Raw} ->
+            process_error(LogPid, badjson, {Path, Raw})
     end.
 
 start_one(LogPid, TrDir, Path, Item, St) ->
@@ -580,6 +598,8 @@ process_download(LogPid, normal, #d{path = Path, file = File} = DRec) ->
     case hbd_pool:do_download(DRec) of
         ok ->
             download_finished(LogPid, filename:join(Path, File));
+        {in_idx, Sha1, Md5} ->
+            process_ignored(LogPid, in_idx, {Sha1, Md5, Path});
         {error, {duplicate, OtherRec}} ->
             process_error(LogPid, duplicate, {File, Path, OtherRec});
         {error, {file_failed, Err}} ->
@@ -590,6 +610,8 @@ process_download(LogPid, normal, #d{path = Path, file = File} = DRec) ->
             process_error(LogPid, bad_sum, {File, Path});
         {error, {sum_error, Type, Err}} ->
             process_error(LogPid, sum_error, {File, Path, Type, Err});
+        {error, {mkdir, Err}} ->
+            process_error(LogPid, mkdir, {Path, Err});
         {error, {rename, Err}} ->
             process_error(LogPid, rename, {File, Path, Err});
         {error, Err} ->

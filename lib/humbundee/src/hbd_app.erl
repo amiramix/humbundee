@@ -29,6 +29,7 @@
 
 start(_StartType, _StartArgs) ->
     ylog:init(),
+    ylog:tin(<<"Log started.">>),
     case get_cfg() of
         {error, _} = Err -> Err;
         Cfg -> start_sup(Cfg)
@@ -51,5 +52,6 @@ start_sup(Cfg) ->
     end.
 
 stop(_State) ->
+    ylog:tin(<<"Closing Humbundee and stopping log.">>),
     ylog:stop(),
     ok.

@@ -166,9 +166,15 @@ check_md5(Path, Md5, LogPid, File) ->
     end.
 
 mv_file(File, Path, Dest) ->
-    case file:rename(Path, filename:join(Dest, File)) of
-        ok -> ok;
-        {error, Err} -> {error, {rename, Err}}
+    DestFile = filename:join(Dest, File),
+    case filelib:ensure_dir(DestFile) of
+        ok ->
+            case file:rename(Path, DestFile) of
+                ok -> ok;
+                {error, Err} -> {error, {rename, Err}}
+            end;
+        {error, Err} ->
+            {error, {mkdir, Err}}
     end.
 
 %%------------------------------------------------------------------------------
@@ -195,7 +201,14 @@ next_download(X, Ids, {{value, #d{file = File} = DRec}, Q}, St) ->
             gen_server:reply(DRec#d.from, {error, {duplicate, OtherRec}}),
             fill_downloads(X, Ids, Q, St);
         false ->
-            next_download(X, Ids, DRec, Q, St)
+            {Sha1, Md5} = DRec#d.sum,
+            case hbd_idx:exists(Sha1, Md5, DRec#d.size) of
+                false ->
+                    next_download(X, Ids, DRec, Q, St);
+                true ->
+                    gen_server:reply(DRec#d.from, {in_idx, Sha1, Md5}),
+                    fill_downloads(X, Ids, Q, St)
+            end
     end.
 
 other_info(#d{out = O, path = P, file = F, sum = {Sha1, Md5}, size = S}) ->

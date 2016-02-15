@@ -91,33 +91,46 @@ clean_structs([], Acc) -> Acc.
 
 clean_struct(X) ->
     Name = proplists:get_value(<<"name">>, X),
-    case proplists:get_value(<<"url">>, X) of
-        Urls when is_list(Urls) -> clean_struct1(X, Name, Urls);
-        undefined -> check_download(X, Name, #{url => undefined})
-    end.
+    Urls = proplists:get_value(<<"url">>, X),
+    clean_struct(X, init_struct(X, Name, Urls)).
 
-clean_struct1(X, Name, Urls) ->
+init_struct(X, undefined, undefined) ->
+    #{raw => X};
+init_struct(X, Name, undefined) when is_binary(Name) ->
+    #{raw => X, name => Name};
+init_struct(X, Name, Urls) when is_binary(Name), is_list(Urls) ->
     {Url, Torrent} = clean_url(Urls),
-    Sha1 = proplists:get_value(<<"sha1">>, X),
-    Md5 = proplists:get_value(<<"md5">>, X),
-    Size = proplists:get_value(<<"file_size">>, X),
-    #{sha1 => Sha1, md5 => Md5, size => Size,
-      name => Name, url => Url, torrent => Torrent}.
+    #{raw => X, url => Url, torrent => Torrent, name => Name}.
 
 clean_url(X) ->
     {proplists:get_value(<<"web">>, X),
      proplists:get_value(<<"bittorrent">>, X)}.
 
-check_download(X, Name = <<"Stream">>, Struct) ->
-    add_stream(get_stream_url(X), Struct#{name => Name});
-check_download(_X, undefined, Struct) ->
+clean_struct(X, #{url := _Url} = Struct) ->
+    Sha1 = proplists:get_value(<<"sha1">>, X),
+    Md5 = proplists:get_value(<<"md5">>, X),
+    Size = proplists:get_value(<<"file_size">>, X),
+    Struct#{sha1 => Sha1, md5 => Md5, size => Size};
+clean_struct(X, Struct) ->
+    do_struct(X, mapping(), Struct).
+
+do_struct(X, [{Name, Prop, Key}|T], #{name := Name} = Struct) ->
+    do_struct1(X, T, Struct, Prop, Key);
+do_struct(X, [{undefined, Prop, Key}|T], Struct) ->
+    do_struct1(X, T, Struct, Prop, Key);
+do_struct(X, [_|T], Struct) ->
+    do_struct(X, T, Struct);
+do_struct(_X, [], Struct) ->
     Struct.
 
-add_stream(undefined, Struct) -> Struct;
-add_stream(Url, Struct) -> Struct#{stream => Url}.
-
-get_stream_url(X) ->
-    case proplists:get_value(<<"hd_stream_url">>, X) of
-        undefined -> proplists:get_value(<<"sd_stream_url">>, X);
-        Url -> Url
+do_struct1(X, T, Struct, Prop, Key) ->
+    case proplists:get_value(Prop, X) of
+        undefined -> do_struct(X, T, Struct);
+        Val when is_binary(Val) -> Struct#{Key => Val}
     end.
+
+mapping() ->
+    [{<<"Stream">>, <<"hd_stream_url">>, stream},
+     {<<"Stream">>, <<"sd_stream_url">>, stream},
+     {undefined,    <<"message">>,       message},
+     {undefined,    <<"external_link">>, link}].

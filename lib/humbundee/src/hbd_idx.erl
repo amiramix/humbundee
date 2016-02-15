@@ -116,8 +116,13 @@ read_recs(Sha1, Md5) ->
     IMd5  = to_int(Md5),
     {ISha1, IMd5, get_recs(ISha1, #idx.sha1) ++ get_recs(IMd5, #idx.md5)}.
 
-to_int(undefined) -> undefined;
-to_int(Sum) -> binary_to_integer(Sum, 16).
+to_int(undefined) ->
+    undefined;
+to_int(Sum) ->
+    case is_hex(Sum) of
+        true -> binary_to_integer(Sum, 16);
+        false -> undefined
+    end.
 
 get_recs(undefined, _Pos) -> [];
 get_recs(ISum, Pos) -> mnesia:dirty_index_read(idx, ISum, Pos).
