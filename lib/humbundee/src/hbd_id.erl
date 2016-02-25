@@ -198,7 +198,8 @@ found_excluded(LPid, Path, Match, Subject) ->
     gen_server:cast(LPid, {excluded, self(), Path, Match, Subject}).
 
 process_ignored(LPid, Type, Args) ->
-    gen_server:cast(LPid, {ignored, self(), Type, Args}).
+    gen_server:cast(LPid, {ignored, self(), Type, Args}),
+    ignored.
 
 process_warning(LPid, Type, Args) ->
     gen_server:cast(LPid, {warn, Type, Args}).
@@ -485,8 +486,11 @@ start_one(LogPid, TrDir, Path, Item, St) ->
               sum    = {maps:get(sha1, Item), maps:get(md5, Item)},
               size   = maps:get(size, Item)},
     Status = start_one1(LogPid, St#st.mode, TrCmd, Path, DRec),
-    if Status =:= done; Status =:= error -> add_to_idx(St#st.id, Status, Item);
-       true -> exit(bad_status) end.
+    if Status =:= done; Status =:= error; Status =:= ignored ->
+            add_to_idx(St#st.id, Status, Item);
+       true ->
+            exit(bad_status)
+    end.
 
 start_one1(LogPid, normal = Mode, TrCmd, Path, DRec) ->
     case ycmd:ensure_dir(filename:join(DRec#d.out, DRec#d.path)) of
@@ -556,6 +560,7 @@ url_to_file(Url) ->
     {ok, {_, _, _, _, Path, _}} = http_uri:parse(binary_to_list(Url)),
     list_to_binary(lists:last(filename:split(Path))).
 
+%%------------------------------------------------------------------------------
 
 do_download(LogPid, Mode, {Cmd, TrFile}, DRec) ->
     case yexec:sh_cmd(Cmd) of
@@ -571,8 +576,8 @@ do_download(LogPid, Mode, undefined, #d{url = Url} = DRec) ->
     process_download(LogPid, Mode, NewDRec).
 
 check_torrent(LogPid, Mode, TrFile, DRec) ->
-    case filelib:is_regular(TrFile) andalso
-        etorrent_bcoding:parse_file(TrFile) of
+    case filelib:is_regular(TrFile)
+        andalso etorrent_bcoding:parse_file(TrFile) of
         {ok, BCode} -> process_torrent(LogPid, Mode, TrFile, DRec, BCode);
         false -> bad_torrent(LogPid, Mode, TrFile, DRec, enoent);
         {error, Err} -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
@@ -583,10 +588,14 @@ bad_torrent(LogPid, Mode, TrFile, DRec, Err) ->
     do_download(LogPid, Mode, undefined, DRec).
 
 process_torrent(LogPid, Mode, TrFile, DRec, BCode) ->
-    %% Support for torrents with multiple files probably not needed
-    [{Name, Size}] = etorrent_io:file_sizes(BCode),
-    NewDRec = DRec#d{torrent = TrFile, file = list_to_binary(Name)},
-    process_download(LogPid, Mode, Size, NewDRec).
+    try etorrent_io:file_sizes(BCode) of
+        %% Support for torrents with multiple files probably not needed
+        [{Name, Size}] ->
+            NewDRec = DRec#d{torrent = TrFile, file = list_to_binary(Name)},
+            process_download(LogPid, Mode, Size, NewDRec)
+    catch
+        error:Err -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
+    end.
 
 process_download(LogPid, Mode, Size, #d{size = Size} = DRec) ->
     process_download(LogPid, Mode, DRec);

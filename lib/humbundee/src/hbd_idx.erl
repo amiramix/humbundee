@@ -151,7 +151,7 @@ to_store(Int) ->
 
 check(Sha1, Md5, Size) ->
     {ISha1, IMd5, Recs} = read_recs(Sha1, Md5),
-    check(ISha1, IMd5, Size, Recs).
+    check(ISha1, IMd5, Size, [R || #idx{status = done} = R <- Recs]).
 
 check( Sha1,  Md5,  S, [#idx{sha1 = Sha1,  md5 = Md5,   size = S}|_]) -> true;
 check(_Sha1,  Md5,  S, [#idx{sha1 = {_,_}, md5 = Md5,   size = S}|_]) -> true;
@@ -167,13 +167,15 @@ do_read(Sum) ->
 do_delete(Sum) ->
     [mnesia:dirty_delete_object(Rec) || Rec <- do_read1(is_hex(Sum), Sum)].
 
+is_hex(<<>>) -> false;
+is_hex(Bin) -> is_hex1(Bin).
 
-is_hex(<<X,T/binary>>)
+is_hex1(<<X,T/binary>>)
   when X >= $0, X =< $9; X >= $a, X =< $f; X >= $A, X =< $F ->
-    is_hex(T);
-is_hex(<<_X,_/binary>>) ->
+    is_hex1(T);
+is_hex1(<<_X,_/binary>>) ->
     false;
-is_hex(<<>>) ->
+is_hex1(<<>>) ->
     true.
 
 format_rec(#idx{sha1 = Sha1, md5 = Md5} = OldRec) ->
