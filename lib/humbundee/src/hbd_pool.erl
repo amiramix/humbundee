@@ -47,7 +47,7 @@
 -include("download.hrl").
 
 -define(INTERVAL, 2000).
--define(TORRENT_TIMEOUT, 10).
+-define(TORRENT_TIMEOUT, 300).
 -record(st, {max, cookie, in, tmp, ids, bad, q, pids}).
 
 %%% API
@@ -67,10 +67,11 @@ init([#{workers := Workers, cookie := Cookie, in := In, tmp := Tmp}]) ->
     {ok, #st{max = Workers, cookie = Cookie, in = In, tmp = Tmp, ids = #{},
              bad = sets:new(), q = queue:new(), pids = sets:new()}}.
 
-handle_call({do, DRec}, From, #st{q = Q} = St) ->
-    Download = DRec#d{from = From},
+handle_call({do, #d{file = File} = DRec}, From, #st{q = Q} = St) ->
+    {ok, MP} = re:compile(<< <<"^">>/binary, File/binary >>),
+    Download = DRec#d{local = #l{from = From, rex = MP}},
     NewQ = queue:in(Download, Q),
-    hbd_id:download_added(DRec#d.logpid, DRec#d.file, DRec#d.torrent),
+    hbd_id:download_added(DRec#d.logpid, File, DRec#d.torrent),
     {noreply, start_downloads(St#st{q = NewQ})};
 handle_call(status, _From,
             St = #st{ids = Ids, bad = Bad, q = Q, pids = Pids}) ->
@@ -122,9 +123,9 @@ check_completed(#st{in = In, ids = Ids, bad = OrgBad} = St) ->
 
 move_file({File, Path}, {Ids, Bad}) ->
     case maps:find(File, Ids) of
-        {ok, #d{from = From} = DRec} ->
+        {ok, #d{local = Loc} = DRec} ->
             Res = process_file(File, Path, DRec),
-            gen_server:reply(From, Res),
+            gen_server:reply(Loc#l.from, Res),
             {maps:remove(File, Ids), update_bad(Res, File, Bad)};
         error ->
             ylog:tin(<<"Error: Unrecognized file in the download folder '">>,
@@ -194,11 +195,10 @@ fill_downloads(X, Ids, Q, St)  -> next_download(X, Ids, queue:out(Q), St).
 
 next_download(_X, Ids, {empty, Q}, _St) ->
     {Ids, Q};
-next_download(X, Ids, {{value, #d{file = File} = DRec}, Q}, St) ->
+next_download(X, Ids, {{value, #d{file = File, local = Loc} = DRec}, Q}, St) ->
     case maps:is_key(File, Ids) of
         true ->
-            OtherRec = other_info(maps:get(File, Ids)),
-            gen_server:reply(DRec#d.from, {error, {duplicate, OtherRec}}),
+            check_same(DRec, maps:get(File, Ids)),
             fill_downloads(X, Ids, Q, St);
         false ->
             {Sha1, Md5} = DRec#d.sum,
@@ -206,27 +206,35 @@ next_download(X, Ids, {{value, #d{file = File} = DRec}, Q}, St) ->
                 false ->
                     next_download(X, Ids, DRec, Q, St);
                 true ->
-                    gen_server:reply(DRec#d.from, {in_idx, Sha1, Md5}),
+                    gen_server:reply(Loc#l.from, {in_idx, Sha1, Md5}),
                     fill_downloads(X, Ids, Q, St)
             end
     end.
 
+check_same(#d{sum = {Sha1, Md5}, size = S, local = #l{from = From}},
+           #d{sum = {Sha1, Md5}, size = S} = Other) ->
+    gen_server:reply(From, {duplicate, other_info(Other)});
+check_same(#d{local = #l{from = From}}, Other) ->
+    gen_server:reply(From, {error, {duplicate, other_info(Other)}}).
+
 other_info(#d{out = O, path = P, file = F, sum = {Sha1, Md5}, size = S}) ->
     [{path, filename:join([O, P, F])}, {sha1, Sha1}, {md5, Md5}, {size, S}].
 
-next_download(X, Ids, #d{torrent = undefined, file = File} = DRec, Q, St) ->
-    hbd_id:file_started(DRec#d.logpid, File),
+next_download(X, Ids, #d{torrent = undefined, local = Loc} = DRec, Q, St) ->
+    #d{logpid = LogPid, file = File} = DRec,
+    hbd_id:file_started(LogPid, File),
     download_file(DRec, St),
-    Ts = erlang:monotonic_time(seconds),
-    fill_downloads(X - 1, Ids#{File => DRec#d{ts = Ts}}, Q, St);
-next_download(X, Ids, #d{torrent = TrFile, file = File} = DRec, Q, St) ->
+    NLoc = Loc#l{ts = erlang:monotonic_time(seconds)},
+    fill_downloads(X - 1, Ids#{File => DRec#d{local = NLoc}}, Q, St);
+next_download(X, Ids, #d{local = Loc} = DRec, Q, St) ->
+    #d{logpid = LogPid, torrent = TrFile, file = File} = DRec,
     case yexec:sh_cmd(<< <<"qbittorrent-nox ">>/binary, TrFile/binary >>) of
         {0, _} ->
-            hbd_id:file_started(DRec#d.logpid, File),
-            Ts = erlang:monotonic_time(seconds),
-            fill_downloads(X - 1, Ids#{File => DRec#d{ts = Ts}}, Q, St);
+            hbd_id:file_started(LogPid, File),
+            NLoc = Loc#l{ts = erlang:monotonic_time(seconds)},
+            fill_downloads(X - 1, Ids#{File => DRec#d{local = NLoc}}, Q, St);
         Err ->
-            gen_server:reply(DRec#d.from, {error, {torrent_cmd, Err}}),
+            gen_server:reply(Loc#l.from, {error, {torrent_cmd, Err}}),
             fill_downloads(X, Ids, Q, St)
     end.
 
@@ -234,20 +242,27 @@ next_download(X, Ids, #d{torrent = TrFile, file = File} = DRec, Q, St) ->
 
 check_stale(#st{tmp = Tmp, ids = Ids} = St) ->
     Ts = erlang:monotonic_time(seconds) - ?TORRENT_TIMEOUT,
-    Old = [Y || {_, Y} <- maps:to_list(Ids), Y#d.ts < Ts],
+    Old = [Y || Y = #d{local = Loc} <- maps:values(Ids),
+                Loc#l.ts < Ts, Loc#l.skip =/= true],
     case length(Old) > 0 andalso ycmd:ls_dir(Tmp) of
-        false -> ok;
-        [] -> process_stale(Old, St);
-        L when is_list(L) -> ok
-    end,
-    St.
+        false -> St;
+        [] -> process_stale(Old, St#st.ids, St);
+        L when is_list(L) -> detect_stale(Old, L, St#st.ids, St)
+    end.
 
-process_stale([#d{logpid = LogPid, file = File} = DRec|T], St) ->
-    hbd_id:stale_detected(LogPid, File),
+detect_stale(Old, Files, Ids, St) ->
+    Fun = fun(#d{local = #l{rex = Rex}}) ->
+                  lists:all(fun(X) -> re:run(X, Rex) =:= nomatch end, Files)
+          end,
+    process_stale(lists:filter(Fun, Old), Ids, St).
+
+process_stale([#d{file = File, local = Loc} = DRec|T], Ids, St) ->
+    hbd_id:stale_detected(DRec#d.logpid, File),
     download_file(DRec, St),
-    process_stale(T, St);
-process_stale([], _) ->
-    ok.
+    NIds = Ids#{File := DRec#d{local = Loc#l{skip = true}}},
+    process_stale(T, NIds, St);
+process_stale([], Ids, St) ->
+    St#st{ids = Ids}.
 
 %%------------------------------------------------------------------------------
 
@@ -256,9 +271,10 @@ download_file(DRec, #st{cookie = Cookie, in = In, tmp = Tmp}) ->
     Fun = fun() -> download_file(Self, Cookie, In, Tmp, DRec) end,
     proc_lib:spawn_link(Fun).
 
-download_file(Parent, Cookie, In, Tmp, #d{url = Url, file = File} = DRec) ->
+download_file(Parent, Cookie, In, Tmp, #d{local = #l{from = From}} = DRec) ->
     proc_lib:init_ack(Parent, {ok, self()}),
     gen_server:cast(?MODULE, {add, self()}),
+    #d{logpid = LogPid, url = Url, file = File} = DRec,
     Path = << (filename:join(Tmp, File))/binary, <<".hbd!">>/binary >>,
     Cmd = << <<"wget -q --load-cookies ">>/binary, Cookie/binary,
              <<" -O ">>/binary, Path/binary, <<" \"">>/binary, Url/binary,
@@ -267,16 +283,16 @@ download_file(Parent, Cookie, In, Tmp, #d{url = Url, file = File} = DRec) ->
         {0, _} ->
             case file:rename(Path, filename:join(In, File)) of
                 ok ->
-                    hbd_id:download_completed(DRec#d.logpid, File),
+                    hbd_id:download_completed(LogPid, File),
                     gen_server:cast(?MODULE, {remove, self()});
                 {error, Err} ->
-                    mark_failed(DRec#d.logpid, File, Path, Err)
+                    mark_failed(From, File, Path, Err)
             end;
         Err ->
-            mark_failed(DRec#d.logpid, File, Path, Err)
+            mark_failed(From, File, Path, Err)
     end.
 
-mark_failed(LPid, File, Path, Err) ->
+mark_failed(From, File, Path, Err) ->
     Res = file:delete(Path),
-    hbd_id:stale_error(LPid, File, Err, Res),
+    gen_server:reply(From, {error, {stale_err, Err, Res}}),
     gen_server:cast(?MODULE, {stale_err, self(), File}).

@@ -34,7 +34,6 @@
          warn_bad_sha1/2,
          stale_detected/2,
          download_completed/2,
-         stale_error/4,
          status/1
         ]).
 
@@ -78,9 +77,6 @@ stale_detected(Pid, File) ->
 
 download_completed(Pid, File) ->
     gen_server:cast(Pid, {downloaded, File}).
-
-stale_error(Pid, File, Err, DelRes) ->
-    gen_server:cast(Pid, {stale_err, File, Err, DelRes}).
 
 status(Pid) ->
     gen_server:call(Pid, status).
@@ -149,9 +145,6 @@ handle_cast({ignored, Pid, Type, Args}, State) ->
     check_done(ignored, Pid, State);
 handle_cast({warn, Type, Args}, State) ->
     log_warning(Type, Args),
-    {noreply, State};
-handle_cast({stale_err, File, Err, DelRes}, State) ->
-    log_error(stale_err, {File, Err, DelRes}),
     {noreply, State};
 handle_cast({error, Pid, Type, Args}, State) ->
     log_error(Type, Pid, Args),
@@ -260,6 +253,12 @@ log_ignored(in_idx, {Sha1, Md5, Path}) ->
     [<<"entry with Sha1 '">>, Sha1, <<"' and/or Md5 '">>, Md5,
      <<"' was found in the index of downloaded files: ">>, endl,
      <<"  [IGN:IDXEXIST] ">>, Path];
+log_ignored(duplicate, {Name, Path, OtherRec}) ->
+    [<<"  Duplicate file name, already downloading file/torrent:">>, endl,
+     <<"  [IGN:DUPLFILE] ">>, Name, endl,
+     <<"  [IGN:DUPLPATH] ">>, Path, endl,
+     <<"  the same file is already being downloaded:">>, endl,
+     <<"  [IGN:DUPLOTHR] ">>, OtherRec];
 log_ignored(asmjs, Path) ->
     [<<"entry is an embedded 'asmjs' application and can't be downloaded: ">>,
      endl,
@@ -305,7 +304,7 @@ log_error(duplicate, {Name, Path, OtherRec}) ->
     [<<"  Duplicate file name, already downloading file/torrent:">>, endl,
      <<"  [ERR:DUPLFILE] ">>, Name, endl,
      <<"  [ERR:DUPLPATH] ">>, Path, endl,
-     <<"  the other file already being downloaded:">>, endl,
+     <<"  a different file with the same name is being downloaded:">>, endl,
      <<"  [ERR:DUPLOTHR] ">>, OtherRec];
 log_error(torrent_cmd, {Name, Path, Err}) ->
     [<<"  Couldn't start bittorrent download:">>, endl,
@@ -609,6 +608,8 @@ process_download(LogPid, normal, #d{path = Path, file = File} = DRec) ->
             download_finished(LogPid, filename:join(Path, File));
         {in_idx, Sha1, Md5} ->
             process_ignored(LogPid, in_idx, {Sha1, Md5, Path});
+        {duplicate, OtherRec} ->
+            process_ignored(LogPid, duplicate, {File, Path, OtherRec});
         {error, {duplicate, OtherRec}} ->
             process_error(LogPid, duplicate, {File, Path, OtherRec});
         {error, {file_failed, Err}} ->
@@ -623,6 +624,8 @@ process_download(LogPid, normal, #d{path = Path, file = File} = DRec) ->
             process_error(LogPid, mkdir, {Path, Err});
         {error, {rename, Err}} ->
             process_error(LogPid, rename, {File, Path, Err});
+        {error, {stale_err, Err, DelRes}} ->
+            process_error(LogPid, stale_err, {File, Err, DelRes});
         {error, Err} ->
             process_error(LogPid, error, {File, Path, Err})
     end;
