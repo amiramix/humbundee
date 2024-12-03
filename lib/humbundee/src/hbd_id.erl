@@ -180,8 +180,8 @@ record_process(LPid) ->
 finish_process(LPid, Pid) ->
     gen_server:cast(LPid, {remove, Pid}).
 
-torrent_finished(LPid, Cmd) ->
-    gen_server:cast(LPid, {torrent, self(), Cmd}).
+% torrent_finished(LPid, Cmd) ->
+%     gen_server:cast(LPid, {torrent, self(), Cmd}).
 
 download_finished(LPid, Name) ->
     gen_server:cast(LPid, {done, self(), Name}),
@@ -421,6 +421,7 @@ do_status(#st{id = Id, cookie = Cookie, out = Out, pids = Pids, count = Count,
 start(#st{id = Id, url = Url, cookie = Cookie, out = OutDir} = St) ->
     yolog:tin(<<"Log started.">>),
     Data = hbd_json:process(Url, Id, Cookie, OutDir),
+    
     TorrentDir = filename:join(OutDir, ?TORRENTS_DIR),
     ok = yocmd:mk_dir(TorrentDir),
     [spawn_line(TorrentDir, X, St) || X <- Data].
@@ -476,8 +477,8 @@ start_one(LogPid, Parent, TrDir, Path, Item, St) ->
 
 start_one(LogPid, TrDir, Path, Item, St) ->
     exit_if_excluded(LogPid, Path, Item, St),
-    Torrent = maps:get(torrent, Item),
-    TrCmd = torrent_cmd(TrDir, Torrent, St#st.cookie),
+    % Torrent = maps:get(torrent, Item),
+    TrCmd = torrent_cmd(TrDir, undefined, St#st.cookie),
     DRec = #d{logpid = LogPid,
               out    = filename:join(St#st.out, ?DATA_DIR),
               path   = Path,
@@ -491,9 +492,9 @@ start_one(LogPid, TrDir, Path, Item, St) ->
             exit(bad_status)
     end.
 
-start_one1(LogPid, normal = Mode, TrCmd, Path, DRec) ->
+start_one1(LogPid, normal = Mode, _TrCmd, Path, DRec) ->
     case ycmd:ensure_dir(filename:join(DRec#d.out, DRec#d.path)) of
-        ok -> do_download(LogPid, Mode, TrCmd, DRec);
+        ok -> do_download(LogPid, Mode, undefined, DRec);
         {error, Err} -> process_error(LogPid, mkdir, {Path, Err})
     end;
 start_one1(LogPid, idx_add = Mode, TrCmd, _Path, DRec) ->
@@ -548,6 +549,7 @@ check_excluded([], _Re, _Opts) ->
 
 torrent_cmd(_TrDir, undefined, _Cookie) ->
     undefined;
+
 torrent_cmd(TrDir, Torrent, Cookie) ->
     TorrentFile = filename:join(TrDir, url_to_file(Torrent)),
     Cmd = << <<"wget -q --load-cookies ">>/binary, Cookie/binary,
@@ -556,54 +558,56 @@ torrent_cmd(TrDir, Torrent, Cookie) ->
     {Cmd, TorrentFile}.
 
 url_to_file(Url) ->
-    {ok, {_, _, _, _, Path, _}} = http_uri:parse(binary_to_list(Url)),
+    {ok, URI} = uri_string:parse(Url),
+    Path = maps:get(path, URI),
     list_to_binary(lists:last(filename:split(Path))).
 
 %%------------------------------------------------------------------------------
 
-do_download(LogPid, Mode, {Cmd, TrFile}, DRec) ->
-    case yexec:sh_cmd(Cmd) of
-        {0, _} ->
-            torrent_finished(LogPid, Cmd),
-            check_torrent(LogPid, Mode, TrFile, DRec);
-        Err ->
-            process_warning(LogPid, no_torrent, {Cmd, Err}),
-            do_download(LogPid, Mode, undefined, DRec)
-    end;
+% do_download(LogPid, Mode, {Cmd, TrFile}, DRec) ->
+%     case yexec:sh_cmd(Cmd) of
+%         {0, _} ->
+%             torrent_finished(LogPid, Cmd),
+%             check_torrent(LogPid, Mode, TrFile, DRec); %% Depends on the etorrent
+%         Err ->
+%             process_warning(LogPid, no_torrent, {Cmd, Err}),
+
+%             do_download(LogPid, Mode, undefined, DRec)
+%     end;
 do_download(LogPid, Mode, undefined, #d{url = Url} = DRec) ->
     NewDRec = DRec#d{file = url_to_file(Url)},
     process_download(LogPid, Mode, NewDRec).
 
-check_torrent(LogPid, Mode, TrFile, DRec) ->
-    case filelib:is_regular(TrFile)
-        andalso etorrent_bcoding:parse_file(TrFile) of
-        {ok, BCode} -> process_torrent(LogPid, Mode, TrFile, DRec, BCode);
-        false -> bad_torrent(LogPid, Mode, TrFile, DRec, enoent);
-        {error, Err} -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
-    end.
+% check_torrent(LogPid, Mode, TrFile, DRec) ->
+%     case filelib:is_regular(TrFile) %% e-torrent stuff
+%         andalso etorrent_bcoding:parse_file(TrFile) of
+%         {ok, BCode} -> process_torrent(LogPid, Mode, TrFile, DRec, BCode);
+%         false -> bad_torrent(LogPid, Mode, TrFile, DRec, enoent);
+%         {error, Err} -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
+%     end.
 
-bad_torrent(LogPid, Mode, TrFile, DRec, Err) ->
-    process_warning(LogPid, bad_torrent, {TrFile, Err}),
-    do_download(LogPid, Mode, undefined, DRec).
+% bad_torrent(LogPid, Mode, TrFile, DRec, Err) ->
+%     process_warning(LogPid, bad_torrent, {TrFile, Err}),
+%     do_download(LogPid, Mode, undefined, DRec).
 
-process_torrent(LogPid, Mode, TrFile, DRec, BCode) ->
-    try etorrent_io:file_sizes(BCode) of
-        %% Support for torrents with multiple files probably not needed
-        [{Name, Size}] ->
-            NewDRec = DRec#d{torrent = TrFile, file = list_to_binary(Name)},
-            process_download(LogPid, Mode, Size, NewDRec)
-    catch
-        error:Err -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
-    end.
+% process_torrent(LogPid, Mode, TrFile, DRec, BCode) ->
+%     try etorrent_io:file_sizes(BCode) of %% FIXME: etorrent dependecy
+%         %% Support for torrents with multiple files probably not needed
+%         [{Name, Size}] ->
+%             NewDRec = DRec#d{torrent = TrFile, file = list_to_binary(Name)},
+%             process_download(LogPid, Mode, Size, NewDRec)
+%     catch
+%         error:Err -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
+%     end.
 
-process_download(LogPid, Mode, Size, #d{size = Size} = DRec) ->
-    process_download(LogPid, Mode, DRec);
-process_download(LogPid, Mode, Size, #d{path = Path, file = File} = DRec) ->
-    process_warning(LogPid, torrent_size, {File, Path, Size}),
-    do_download(LogPid, Mode, undefined, DRec#d{torrent = undefined}).
+% process_download(LogPid, Mode, Size, #d{size = Size} = DRec) ->
+%     process_download(LogPid, Mode, DRec);
+% process_download(LogPid, Mode, Size, #d{path = Path, file = File} = DRec) ->
+%     process_warning(LogPid, torrent_size, {File, Path, Size}),
+%     do_download(LogPid, Mode, undefined, DRec#d{torrent = undefined}).
 
 process_download(LogPid, normal, #d{path = Path, file = File} = DRec) ->
-    case hbd_pool:do_download(DRec) of
+    case hbd_pool:do_download(DRec) of 
         ok ->
             download_finished(LogPid, filename:join(Path, File));
         {in_idx, Sha1, Md5} ->
