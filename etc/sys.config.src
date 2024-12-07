@@ -1,7 +1,8 @@
 %% -*- erlang -*-
-%% This file is auto-generated from template: sys.config.src
+%% This file is auto-generated from template: sys.config.src %%
 
-[{kernel,
+[
+  {kernel,
   [{net_ticktime, 90},
    {start_timer, true},
    {inet_dist_listen_min, 22200},

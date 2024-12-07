@@ -21,8 +21,10 @@
 %% CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
 %% ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
 %% EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+-compile([{parse_transform, lager_transform}]).
 
 -module(hbd_api).
+
 -behaviour(gen_server).
 
 %% API
@@ -46,7 +48,9 @@
 
 -include_lib("yolf/include/yolf.hrl").
 
+
 -record(st, {cfg, ids, pids}).
+
 
 %%% API
 start_link(Cfg) ->
@@ -98,6 +102,7 @@ download_id(Id, Mode, #st{ids = Ids} = State) ->
             ylog:in(<<"Id '">>, Id, <<"' already downloading. Ignoring...">>),
             {{error, einprogress}, State};
         false ->
+            
             start_download(Id, Mode, State)
     end.
 
