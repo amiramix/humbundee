@@ -491,9 +491,9 @@ start_one(LogPid, TrDir, Path, Item, St) ->
             exit(bad_status)
     end.
 
-start_one1(LogPid, normal = Mode, TrCmd, Path, DRec) ->
+start_one1(LogPid, normal = Mode, _TrCmd, Path, DRec) ->
     case ycmd:ensure_dir(filename:join(DRec#d.out, DRec#d.path)) of
-        ok -> do_download(LogPid, Mode, TrCmd, DRec);
+        ok -> do_download(LogPid, Mode, undefined, DRec);
         {error, Err} -> process_error(LogPid, mkdir, {Path, Err})
     end;
 start_one1(LogPid, idx_add = Mode, TrCmd, _Path, DRec) ->
@@ -559,48 +559,10 @@ url_to_file(Url) ->
     {ok, {_, _, _, _, Path, _}} = http_uri:parse(binary_to_list(Url)),
     list_to_binary(lists:last(filename:split(Path))).
 
-%%------------------------------------------------------------------------------
 
-do_download(LogPid, Mode, {Cmd, TrFile}, DRec) ->
-    case yexec:sh_cmd(Cmd) of
-        {0, _} ->
-            torrent_finished(LogPid, Cmd),
-            check_torrent(LogPid, Mode, TrFile, DRec);
-        Err ->
-            process_warning(LogPid, no_torrent, {Cmd, Err}),
-            do_download(LogPid, Mode, undefined, DRec)
-    end;
 do_download(LogPid, Mode, undefined, #d{url = Url} = DRec) ->
     NewDRec = DRec#d{file = url_to_file(Url)},
     process_download(LogPid, Mode, NewDRec).
-
-check_torrent(LogPid, Mode, TrFile, DRec) ->
-    case filelib:is_regular(TrFile)
-        andalso etorrent_bcoding:parse_file(TrFile) of
-        {ok, BCode} -> process_torrent(LogPid, Mode, TrFile, DRec, BCode);
-        false -> bad_torrent(LogPid, Mode, TrFile, DRec, enoent);
-        {error, Err} -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
-    end.
-
-bad_torrent(LogPid, Mode, TrFile, DRec, Err) ->
-    process_warning(LogPid, bad_torrent, {TrFile, Err}),
-    do_download(LogPid, Mode, undefined, DRec).
-
-process_torrent(LogPid, Mode, TrFile, DRec, BCode) ->
-    try etorrent_io:file_sizes(BCode) of
-        %% Support for torrents with multiple files probably not needed
-        [{Name, Size}] ->
-            NewDRec = DRec#d{torrent = TrFile, file = list_to_binary(Name)},
-            process_download(LogPid, Mode, Size, NewDRec)
-    catch
-        error:Err -> bad_torrent(LogPid, Mode, TrFile, DRec, Err)
-    end.
-
-process_download(LogPid, Mode, Size, #d{size = Size} = DRec) ->
-    process_download(LogPid, Mode, DRec);
-process_download(LogPid, Mode, Size, #d{path = Path, file = File} = DRec) ->
-    process_warning(LogPid, torrent_size, {File, Path, Size}),
-    do_download(LogPid, Mode, undefined, DRec#d{torrent = undefined}).
 
 process_download(LogPid, normal, #d{path = Path, file = File} = DRec) ->
     case hbd_pool:do_download(DRec) of
