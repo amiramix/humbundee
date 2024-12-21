@@ -1,3 +1,2 @@
 %% -*- erlang -*-
 {"develop", "=REPOBASE=/yolf.git", "yolf"}.
-{"master",  "https://github.com/amiramix/etorrent_core.git", "etorrent_core"}.

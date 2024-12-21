@@ -31,13 +31,11 @@ setup() ->
     #{regex := RegexL} = Cfg0 = add_user_config(read_config()),
     Cfg1 = Cfg0#{regex => process_regex(RegexL)},
     validate_cfg(Cfg1),
-    start_qbt(),
     Cfg1.
 
 check_deps() ->
     IsWget  = is_cmd(<<"wget">>),
-    IsBt    = is_cmd(<<"qbittorrent-nox">>),
-    All = [IsWget, IsBt],
+    All = [IsWget],
     Err = [X || {false, X} <- All],
     check_deps(Err).
 
@@ -47,8 +45,8 @@ is_cmd(App) ->
 check_deps([]) ->
     true;
 check_deps(App) ->
-    ylog:in(<<"Error: Humbundee requires that wget and qbittorrent-nox \n">>,
-            <<"are installed in the system. The following applications ">>,
+    ylog:in(<<"Error: Humbundee requires that wget \n">>,
+            <<"is installed in the system. The following applications ">>,
             <<"couldn't be found:">>),
     [ylog:i(<<X/binary, <<"\n">>/binary >>) || X <- App],
     throw(no_deps).
@@ -147,6 +145,7 @@ filter_opts(_)                          -> false.
 %%------------------------------------------------------------------------------
 
 validate_cfg(#{cookie := Cookie, in := In, tmp := Tmp, dest := Dest}) ->
+
     case filelib:is_regular(Cookie) of
         true -> ok;
         false -> no_cookie(Cookie)
@@ -184,16 +183,3 @@ not_empty(Name, Type, Dir) ->
 
 %%------------------------------------------------------------------------------
 
-start_qbt() ->
-    ylog:i(<<"Starting qbittorrent daemon... ">>),
-    case yexec:sh_cmd(<<"qbittorrent-nox -d">>) of
-        {0, _} ->
-            ylog:in(<<"OK">>),
-            ok;
-        {1, _} ->
-            ylog:in(<<"Already started.">>),
-            ok;
-        Err ->
-            ylog:in(<<"Error: ">>, Err),
-            throw(no_qbt)
-    end.
