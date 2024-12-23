@@ -38,7 +38,7 @@
 # Project-specific variables and settings (Change where required)
 #-------------------------------------------------------------------------------
 # Tested version known to compile riak_pb
-REBARURL   ?= https://github.com/yoonka/erlstrap/wiki/rebar
+REBARURL   ?= https://github.com/yoonka/erlstrap/wiki/rebar3
 # Git repository for dependencies listed in files in deps-versions/
 GITURL     ?= https://github.com/yoonka
 # The development branch, use dependencies from deps-versions/$GITDEVELOP
@@ -65,7 +65,7 @@ BLDERLPATH  := deps/builderl
 # Local name for the downloaded builderl/makefiles/GNUmakefileBuilderl
 BLDERLLOCAL := GNUmakefileBuilderl
 # URL to download the builderl/makefiles/GNUmakefileBuilderl makefile
-BLDERLMKURL := https://raw.githubusercontent.com/yoonka/builderl/master/makefiles/GNUmakefileBuilderl
+BLDERLMKURL := https://raw.githubusercontent.com/builderl/builderl/master/makefiles/GNUmakefileBuilderl
 
 ifneq ($(MAKECMDGOALS),$(filter $(MAKECMDGOALS),rm-builderl))
 
