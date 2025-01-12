@@ -1,5 +1,7 @@
 /rebar
 
+/_build/
+
 /tmp/
 /releases
 
