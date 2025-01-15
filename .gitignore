@@ -1,4 +1,7 @@
 /rebar
+rebar.lock
+
+/_build/
 
 /tmp/
 /releases

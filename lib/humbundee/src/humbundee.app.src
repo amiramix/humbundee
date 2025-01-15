@@ -29,7 +29,6 @@
   {vsn, "0.0.1"},
   {modules,
    [
-    =MODULES=
    ]},
   {registered, [hbd_sup, hbd_get_sup]},
   {applications, [kernel, stdlib, sasl, lager]},

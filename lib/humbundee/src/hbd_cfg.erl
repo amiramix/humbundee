@@ -83,7 +83,7 @@ add_user_config(Cfg) ->
     end.
 
 get_home() ->
-    case os:getenv(<<"HOME">>) of
+    case os:getenv("HOME") of
         false -> no_home();
         Home -> Home
     end.
