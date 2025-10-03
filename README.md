@@ -23,8 +23,9 @@ Hmmm. You mean, why I wrote it or why you should use it? :-) Not that there is a
 
 But let's see what Humbundee is capable of:
 
-### Defaults to bittorrent
-Humbundee will try to download a file using `qbittorrent-nox` first and will fallback to `wget` if there was an error when processing the torrent file. This is mainly to avoid exploiting Humble Bundle servers if the file can be downloaded from somewhere else. And I chose qbittorrent because that was the only bittorrent client I could find that worked from command line and was properly supporting web seeds.
+### Download Method
+
+Humbundee downloads files using `wget`, ensuring that files are retrieved directly from their source. 
 
 ### Verifies checksums and sizes
 All downloaded files are checked if they are of the expected size and if their MD5/SHA1 checksums match those advertised on the bundle page (actually, SHA1 checksums are not advertised but they are available in the metadata describing the bundle).
@@ -67,10 +68,41 @@ It's a standard on Linux and available to be installed on other platforms. On *B
 ### git
 It's needed to clone the repository to your disk and also to fetch the build scripts (done automatically). At least version `1.6.x` would be needed.
 
-### qbittorrent-nox
-Available to be installed from a package on most systems. Check if it's installed and available in the path with:
+### libyajl
+Libyajl headers need to be installed on your system, used to parse JSON.
 
-    qbittorrent-nox --help
+### Libyajl Installation  
+
+To install Libyajl on your system, follow the appropriate steps for your operating system:  
+
+#### Ubuntu/Debian  
+```bash
+sudo apt update
+```
+``` bash
+sudo apt install libyajl-dev 
+```
+```bash Fedora  
+~sudo dnf install yajl-devel
+```  
+
+#### Arch Linux  
+```bash
+sudo pacman -S yajl
+```  
+
+#### macOS (using Homebrew)  
+```bash
+brew install yajl
+```  
+
+#### FreeBSD  
+```sh
+pkg install yajl
+``` 
+
+After installing, ensure the headers (`yajl/yajl_parse.`) are available in your system's include path.
+
 
 ### wget
 Also widely available to be installed from a package. Check if it's installed and available in the path with:
@@ -78,7 +110,7 @@ Also widely available to be installed from a package. Check if it's installed an
     wget --help
 
 ### cookie
-You need to be logged in to Humble Bundle in order to download files from your bundle. But currently Humbundee doesn't allow you to log in. Instead, it expects you to log in using a normal browser and export a cookie which it can then use use to access the part of the website that only you are authorized to use. The cookie must be in a format compatible with `wget`. I use [this extension](https://chrome.google.com/webstore/detail/cookiestxt/njabckikapfpffapmjgojcnbfjonfjfg) to export the cookie from Chrome.
+You need to be logged in to Humble Bundle in order to download files from your bundle. But currently Humbundee doesn't allow you to log in. Instead, it expects you to log in using a normal browser and export a cookie which it can then use use to access the part of the website that only you are authorized to use. The cookie must be in a format compatible with `wget`. I use [this extension](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc) to export the cookie from Chrome.
 
 How it works?
 -----
@@ -91,19 +123,23 @@ Firstly, it checks if the file can be downloaded at all. Some files, like stream
 
 If all is good the process tries to download the torrent file with `wget`. If the torrent file doesn't exist, or can't be downloaded, or is incorrect, or can't be parsed, then the process discards information about the torrent file and the file will be downloaded as if the torrent didn't exist.
 
-Please note that up to this moment all processing was done in parallel, including downloading torrent files with `wget`. Whereas downloading dozens of short torrent files simultaneously isn't a big deal, downloading so many actual files very likely would be a big deal. Therefore the actual downloading is managed by a separate `gen_server` called `hbd_pool`. It cooperates with `qbittorrent-nox` to download files with torrents and uses `wget` to download files without torrents.
+Please note that up to this point, all processing has been done in parallel, including downloading files with `wget`. While downloading many small files simultaneously isn’t a big issue, handling multiple large downloads at once can be resource-intensive. To manage this efficiently, the actual downloading is handled by a separate `gen_server` called `hbd_pool`, which coordinates `wget` downloads to ensure controlled and efficient file retrieval.  
 
-Each process that hasn't died so far adds its download to `hbd_pool` and waits until the download is completed. The download isn't started immediatelly but `hbd_pool` adds them to a queue and starts when the amount of active downloads is less than the specified threshold. Active downloads are those either added to `qbittorrent-nox` or started with `wget`.
 
-This part is a bit hacky because `qbittorrent-nox` doesn't provide any API to control the downloads. Torrent downloads are added to `qbittorrent-nox`, which is configured to keep all pending downloads in the `temp` folder and all finished downloads in the `downloads` folder. The `temp` folder is also used by `hbd_pool` to store the temporary versions of files that are being downloaded by `wget`. Every two seconds `hbd_pool` performs three important checks:
+Each process that hasn't died so far adds its download to `hbd_pool` and waits until the download is completed. The download isn't started immediatelly but `hbd_pool` adds them to a queue and starts when the amount of active downloads is less than the specified threshold. Active downloads are started with `wget`.
+
+All downloads are handled by `wget`, which saves files directly into the `temp` folder while they are in progress. The `temp` folder is also used by `hbd_pool` to store temporary versions of files being downloaded. Once a download is complete, the file is moved to the `downloads` folder.  
+
+Every two seconds, `hbd_pool` performs three important checks:
 
  1. List completed downloads in the `downloads` folder. Every completed download is moved to the destination folder constructed from the download properties, i.e.: `<key>/<publisher>/<title> - <platform>`. 
  2. Start new downloads from the queue up to the maximum allowed amount of active downloads.
- 3. List pending downloads in the `temp` folder if the map with active downloads isn't yet emptied. The `temp` folder will be empty if all `wget` downloads have finished and if `qbittorrent-nox` isn't actively downloading any files. This may happen if all seeds mentioned in the torrent file are inactive. In that case `hbd_pool` considers all active downloads older than 10 seconds as stale and starts downloading them with `wget`.
+ 3. List pending downloads in the `temp` folder if the map with active downloads isn't yet emptied. The `temp` folder will be empty when all `wget` downloads have finished. If some files remain in the active downloads list but haven't progressed for more than 10 seconds, `hbd_pool` considers them stale and restarts the download using `wget`.  
 
-Lets reiterate the last point. When the `temp` folder is empty but the map containing all active downloads isn't yet empty it means that some files have been added to `qbittorrent-nox` but are not being actively downloaded. If those files have been added to `qbittorrent-nox` more than 10 seconds ago we can safely assume that they won't be started in the foreseeable future and treat them as stale - i.e. try to download them with `wget` instead. This probably needs an additional explanation. The thing is that each download always contains an URL to download the file with HTTP/S but the torrent file is optional. Additionally, the web seed in the torrent file is not the same as the URL to download the file with HTTP/S. The former doesn't always work but the later should always work. That's why downloading the stale file with `wget` from the HTTP/S URL is usually a safe fallback.
 
-This brings us to yet another quite important point. Sometimes the torrent downloads are tad slow or they stop and don't seem to be progressing anymore. In that case just delete the download from `qbittorrent-nox` along with the temporary file from the `temp` folder (when deleting the download from the list `qbittorrent-nox` will show you a checkbox asking if the file should be also deleted). Once `temp` becomes empty all unfinished downloads will be detected as stale and `hbd_pool` will start downloading them with `wget`.
+Let's reiterate the last point. When the `temp` folder is empty but the map containing all active downloads isn't, it means that some files have been added but are not being actively downloaded. If those files have been in the list for more than 10 seconds without progress, they are considered stale and will be reattempted using `wget`.  
+
+Each download always includes a direct HTTP/S URL, ensuring that `wget` can retrieve the file reliably. If a file isn't progressing, removing the temporary file from the `temp` folder will trigger `hbd_pool` to detect it as stale and restart the download using `wget`.  
 
 Now lets come back to the processes started by `hbd_id` which are still waiting for the downloads to be completed. For each file that `hbd_pool` moves from the `downloads` folder to the destination folder it also sends back a response to the waiting process which initially added the file to `hbd_pool`. Each `hbd_id` remembers how many processes have been started to download files in the given bundle. The bundle download is finished when all those processes die after receiving either an OK that the file has been downloaded properly or an error. When no child process is left `hbd_id` adds a summary to the log file, then the log file is closed and the `hbd_id` dies as well.
 
@@ -161,20 +197,19 @@ The meaning of these options is as follows:
 Location of the cookie file
 
 #### `download_dir`
-Folder where `qbittorrent-nox` stores completed downloads. Humbundee monitors this folder and moves completed files to an appropriate subfolder in the `destination_dir`.
+Folder where completed downloads are stored. Humbundee monitors this folder and moves completed files to an appropriate subfolder in the `destination_dir`.
 
 #### `temp_dir`
-Folder where `qbittorrent-nox` and `wget` store incomplete downloads.
+Folder where `wget` store incomplete downloads.
 
 #### `workers`
-Amount of downloads that can be active at the same time (the sum of downloads that `hbd_pool` adds to `qbittorrent-nox` or starts with `wget` can't be bigger that this threshold).
+The maximum number of concurrent downloads that can be active at the same time is limited by this threshold. The sum of downloads that `hbd_pool` starts with `wget` cannot exceed this limit.  
 
 #### `destination_dir`
 A parent folder for completed bundles. All files in completed bundles are stored in subfolders named according to the following pattern:
 
     Key
       .etr, .json, .log
-      *_torrents
       *_data
         *- Publisher
           *- Title - platform
@@ -183,7 +218,6 @@ Where:
 
  * `Key` is the bundle key, an alphanumeric set of characters associated with each bundle.
  * `.etr`, `.json`, `.log` are files produced when downloading the bundle.
- * `_torrents` contains all downloaded torrent files.
  * `_data` is the parent folder for all downloaded files.
  * `Publisher` is usually the company behind the digital goods, games, comics, etc.
  * `Title` is the title of the digital item, a game title, a book title, etc.
@@ -206,16 +240,7 @@ Humbundee tries to match `Pattern` against the content of specific fields in the
 
 The `Options` list may contain options accepted by both, [re:compile/2](http://erlang.org/doc/man/re.html#compile-2) and [re:run/4](http://erlang.org/doc/man/re.html#run-3). Humbundee uses those accepted by [re:compile/2](http://erlang.org/doc/man/re.html#compile-2) when compiling the regex and filters them out so that when [re:run/4](http://erlang.org/doc/man/re.html#run-3) is later called to check the match only options accepted by [re:run/4](http://erlang.org/doc/man/re.html#run-3) are passed to it.
 
-Configure `qbittorrent-nox`
------
 
-### Start `qbittorrent-nox` in daemon mode
-
-    qbittorrent-nox -d
-
-### Open the web interface
-
-[http://127.0.0.1:8080/](http://127.0.0.1:8080/)
 
 ### Configure the `download_dir` folder
 
@@ -225,9 +250,7 @@ On the **Downloads** tab edit _Save files to location:_. It must have the same v
 
 On the same **Downloads** tab edit _Keep incomplete torrents in:_. It must have the same value as `temp_dir` configured for Humbundee in the previous section.
 
-### Configure other options
 
-It may be a good idea to tick the _Append .!qB extension to incomplete files_ check box to distinguish files downloaded with `qbittorrent-nox` from files downloaded by `hbd_pool` with `wget` - they will have the extension `.hbd!`.
 
 Other options, especially those on **Connection** and **Speed** tabs can be configured to match your network link speed. They don't affect Humbundee in any way.
 
@@ -242,7 +265,7 @@ Let's get started!
 ### Install prerequisites
 
 
-Install Erlang, GNU make, git, qbittorrent-nox, wget.
+Install Erlang, GNU make, git wget,yajl.
 
 ### Download the cookie
 
@@ -254,9 +277,7 @@ Instead of updating the default configuration [humbundee/etc/sys.config.src](htt
 
 See the section **All about configuration** above for details.
 
-### Configure `qbittorrent-nox`
 
-See the section **All about configuration** above for details.
 
 ### Compile Humbundee
 
